@@ -142,3 +142,23 @@ curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"userId": "mock-user-id", "message": "skip", "state": "REFLECTION"}'
 ```
+
+---
+
+## 8. Model API Configuration
+
+You can configure the active AI model endpoint (Google Gemini or OpenAI) inside the backend environment variables.
+
+### Environment Setup (`backend/.env`)
+Add either of the following keys to your local configuration:
+
+```env
+# Enable Google Gemini (gemini-1.5-flash)
+GEMINI_API_KEY="AIzaSy..."
+
+# Enable OpenAI (gpt-4o-mini)
+OPENAI_API_KEY="sk-..."
+```
+
+If neither key is configured or set, the system will automatically default to local mock fallback replies.
+

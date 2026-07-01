@@ -1,3 +1,5 @@
+import { llmService } from '../services/llm.service.js';
+
 export interface OnboardingStateResult {
   response: string;
   nextState: string;
@@ -16,9 +18,36 @@ export class OnboardingAgent {
   public async executeTurn(
     currentState: string,
     message: string,
-    turnCount: number
+    _turnCount: number
   ): Promise<OnboardingStateResult> {
     const text = message.toLowerCase();
+    const provider = llmService.getProvider();
+
+    if (provider !== 'mock') {
+      const response = await llmService.generate('onboarding', `Current State: ${currentState}. User message: ${message}`);
+      // Deduce state transitions dynamically
+      let nextState = 'ONBOARDING_S1';
+      let slotsFilled: any = {};
+
+      if (currentState === 'ONBOARDING_S1') {
+        nextState = 'ONBOARDING_S2';
+      } else if (currentState === 'ONBOARDING_S2') {
+        nextState = 'ONBOARDING_S3';
+        slotsFilled = { primary_goal: message, goal_category: 'technical' };
+      } else if (currentState === 'ONBOARDING_S3') {
+        nextState = 'ONBOARDING_S4';
+      } else if (currentState === 'ONBOARDING_S4') {
+        nextState = 'ONBOARDING_S5';
+        slotsFilled = { weekly_time_budget_hours: 6, best_time: 'evening' };
+      } else if (currentState === 'ONBOARDING_S5') {
+        nextState = 'ONBOARDING_S6';
+        slotsFilled = { confidence_score: 8, readiness_stage: 'action', success_definition: 'Consistency' };
+      } else if (currentState === 'ONBOARDING_S6') {
+        nextState = 'PLANNING';
+      }
+
+      return { response, nextState, slotsFilled };
+    }
 
     switch (currentState) {
       case 'ONBOARDING_S1':

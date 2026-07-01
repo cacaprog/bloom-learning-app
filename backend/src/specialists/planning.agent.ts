@@ -1,4 +1,5 @@
 import { promptService } from '../services/prompt.service.js';
+import { llmService } from '../services/llm.service.js';
 
 export interface PlanningResult {
   response: string;
@@ -22,6 +23,7 @@ export class PlanningAgent {
     _planningHistory: any[]
   ): Promise<PlanningResult> {
     const text = message.toLowerCase();
+    const provider = llmService.getProvider();
 
     if (text.includes('confirm') || text.includes('yes') || text.includes('agree')) {
       const budget = profile?.weekly_time_budget_hours || 6;
@@ -41,8 +43,12 @@ export class PlanningAgent {
         };
       });
 
+      const confirmText = provider !== 'mock'
+        ? await llmService.generate('planning', `User has confirmed scheduling: ${message}`)
+        : `Excellent! I have confirmed your weekly plan with ${sessionCount} sessions (${duration} mins each). I've synced this to your calendar. Ready to go!`;
+
       return {
-        response: `Excellent! I have confirmed your weekly plan with ${sessionCount} sessions (${duration} mins each). I've synced this to your calendar. Ready to go!`,
+        response: confirmText,
         proposedPlan: {
           weekly_goal: `Complete study for ${profile?.primary_goal}`,
           sessions,
@@ -51,7 +57,10 @@ export class PlanningAgent {
       };
     }
 
-    const loadedPrompt = promptService.getPrompt('planning');
+    const loadedPrompt = provider !== 'mock'
+      ? await llmService.generate('planning', message)
+      : promptService.getPrompt('planning');
+
     return {
       response: loadedPrompt,
       confirmed: false,

@@ -1,4 +1,5 @@
 import { promptService } from '../services/prompt.service.js';
+import { llmService } from '../services/llm.service.js';
 
 export interface RecoveryResult {
   response: string;
@@ -12,6 +13,28 @@ export class RecoveryAgent {
     currentStage: string
   ): Promise<RecoveryResult> {
     const text = message.toLowerCase();
+    const provider = llmService.getProvider();
+
+    if (provider !== 'mock') {
+      const response = await llmService.generate('recovery', `Stage: ${currentStage}, Message: ${message}`);
+      let nextStage = 'EXPLORE';
+      let rescheduleNeeded = false;
+
+      if (currentStage === 'INITIATE') {
+        nextStage = 'EXPLORE';
+      } else if (currentStage === 'EXPLORE') {
+        nextStage = 'RESOLVE';
+      } else if (currentStage === 'RESOLVE') {
+        nextStage = 'COMPLETE';
+        if (text.includes('yes') || text.includes('sure') || text.includes('please') || text.includes('ok')) {
+          rescheduleNeeded = true;
+        }
+      } else if (currentStage === 'COMPLETE') {
+        nextStage = 'ACTIVE_WEEK';
+      }
+
+      return { response, nextStage, rescheduleNeeded };
+    }
 
     switch (currentStage) {
       case 'INITIATE':

@@ -1,4 +1,5 @@
 import { promptService } from '../services/prompt.service.js';
+import { llmService } from '../services/llm.service.js';
 
 export interface ReflectionResult {
   prompt: string;
@@ -8,6 +9,11 @@ export interface ReflectionResult {
 
 export class ReflectionAgent {
   public async generatePrompt(triggerType: string): Promise<string> {
+    const provider = llmService.getProvider();
+    if (provider !== 'mock') {
+      return await llmService.generate('reflection', `Trigger Type: ${triggerType}`);
+    }
+
     const loadedPrompt = promptService.getPrompt('reflection');
     if (loadedPrompt.includes('win') || loadedPrompt.includes('win this week')) {
       return loadedPrompt;
