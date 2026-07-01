@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PromptFileStructure",
+  "type": "object",
+  "properties": {
+    "agent_id": {
+      "type": "string"
+    },
+    "prompt_text": {
+      "type": "string"
+    }
+  },
+  "required": ["agent_id", "prompt_text"]
+}

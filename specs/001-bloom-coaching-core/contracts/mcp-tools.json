@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Bloom MCP Tools Contract",
+  "description": "Exposed tool schemas of the bloom-calendar-server MCP server.",
+  "type": "object",
+  "properties": {
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "inputSchema": {
+            "type": "object"
+          }
+        },
+        "required": ["name", "description", "inputSchema"]
+      }
+    }
+  },
+  "required": ["tools"]
+}

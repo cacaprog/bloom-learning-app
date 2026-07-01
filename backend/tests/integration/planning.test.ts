@@ -1,0 +1,79 @@
+import request from 'supertest';
+import app from '../../src/index.js';
+import { db } from '../../src/services/db.service.js';
+import { UserModel } from '../../src/models/user.js';
+import { LearnerProfileModel } from '../../src/models/profile.js';
+import { calendarService } from '../../src/services/calendar.service.js';
+import crypto from 'crypto';
+
+describe('Planning Integration Flow', () => {
+  const userId = crypto.randomUUID();
+
+  beforeAll(async () => {
+    if (process.env.DATABASE_URL) {
+      await db.query('DELETE FROM learning_sessions WHERE plan_id IN (SELECT id FROM weekly_plans WHERE user_id = $1)', [userId]);
+      await db.query('DELETE FROM weekly_plans WHERE user_id = $1', [userId]);
+      await db.query('DELETE FROM learner_profiles WHERE user_id = $1', [userId]);
+      await db.query('DELETE FROM users WHERE id = $1', [userId]);
+    }
+
+    // Create user and profile first
+    await UserModel.create({ id: userId, email: 'plan-test@bloom.edu' });
+    await LearnerProfileModel.create({
+      id: crypto.randomUUID(),
+      user_id: userId,
+      primary_goal: 'Coding skill',
+      goal_category: 'technical',
+      motivation_reasons: ['job'],
+      past_attempts: [],
+      barriers: [],
+      weekly_time_budget_hours: 6,
+      best_time: 'evening',
+      preferred_formats: ['practice'],
+      confidence_score: 8,
+      readiness_stage: 'action',
+      success_definition: 'Learn Express',
+    });
+
+    CalendarServiceClear();
+  });
+
+  afterAll(async () => {
+    if (process.env.DATABASE_URL) {
+      await db.query('DELETE FROM learning_sessions WHERE plan_id IN (SELECT id FROM weekly_plans WHERE user_id = $1)', [userId]);
+      await db.query('DELETE FROM weekly_plans WHERE user_id = $1', [userId]);
+      await db.query('DELETE FROM learner_profiles WHERE user_id = $1', [userId]);
+      await db.query('DELETE FROM users WHERE id = $1', [userId]);
+      await db.close();
+    }
+  });
+
+  function CalendarServiceClear() {
+    calendarService.deleteEvent('dummy'); // Clear mock storage
+  }
+
+  it('should draft and then confirm a weekly plan, syncing events to the calendar', async () => {
+    // Propose planning
+    let res = await request(app)
+      .post('/api/chat')
+      .send({ userId, message: 'I want to plan my week', state: 'PLANNING' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe('PLANNING');
+    expect(res.body.response).toContain('Option A');
+
+    // Confirm planning
+    res = await request(app)
+      .post('/api/chat')
+      .send({ userId, message: 'I confirm Option A', state: 'PLANNING' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe('ACTIVE_WEEK');
+    expect(res.body.response).toContain('confirmed');
+
+    // Verify calendar events synced
+    const events = await calendarService.getEvents();
+    expect(events.length).toBe(3);
+    expect(events[0].title).toContain('Study session');
+  });
+});
