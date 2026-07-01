@@ -11,7 +11,7 @@ export const ProfileSummary: React.FC<ProfileSummaryProps> = ({ onConfirm }) => 
       <p>Your learning profile has been ratified and saved. You're ready to plan your first week!</p>
       <div className="actions">
         <button onClick={onConfirm} className="confirm-btn">
-          Go to Weekly Planner
+          Start Weekly Planning
         </button>
       </div>
     </div>

@@ -42,7 +42,12 @@ async function mockQuery(text: string, params?: any[]) {
       readiness_stage: params![11],
       success_definition: params![12],
     };
-    tables.learner_profiles.push(profile);
+    const existingIndex = tables.learner_profiles.findIndex((p) => p.user_id === profile.user_id);
+    if (existingIndex > -1) {
+      tables.learner_profiles[existingIndex] = profile;
+    } else {
+      tables.learner_profiles.push(profile);
+    }
     return { rows: [profile] };
   }
 

@@ -27,6 +27,19 @@ export class LearnerProfileModel {
         preferred_formats, confidence_score, readiness_stage, success_definition
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      ON CONFLICT (user_id) DO UPDATE SET
+        primary_goal = EXCLUDED.primary_goal,
+        goal_category = EXCLUDED.goal_category,
+        motivation_reasons = EXCLUDED.motivation_reasons,
+        past_attempts = EXCLUDED.past_attempts,
+        barriers = EXCLUDED.barriers,
+        weekly_time_budget_hours = EXCLUDED.weekly_time_budget_hours,
+        best_time = EXCLUDED.best_time,
+        preferred_formats = EXCLUDED.preferred_formats,
+        confidence_score = EXCLUDED.confidence_score,
+        readiness_stage = EXCLUDED.readiness_stage,
+        success_definition = EXCLUDED.success_definition,
+        updated_at = CURRENT_TIMESTAMP
       RETURNING *;
     `;
     const res = await db.query(query, [

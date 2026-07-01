@@ -81,7 +81,7 @@ export class CoordinatorService {
           const onboardingResult = await onboardingAgent.executeTurn(
             currentState,
             userMessage,
-            context.lastMessages.length
+            CoordinatorService.onboardingSlots[userId] || {}
           );
           responseToUser = onboardingResult.response;
           newState = onboardingResult.nextState;

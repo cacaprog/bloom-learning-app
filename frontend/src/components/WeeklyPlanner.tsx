@@ -19,23 +19,23 @@ export const WeeklyPlanner: React.FC<WeeklyPlannerProps> = ({ userId, onBackToCh
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const fetchPlan = async () => {
-    try {
-      const response = await fetch(`/api/planning/latest?userId=${userId}`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch plan. Let\'s co-create one first.');
-      }
-      const data = await response.json();
-      setPlan(data.plan);
-      setSessions(data.sessions);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    const fetchPlan = async () => {
+      try {
+        const response = await fetch(`/api/planning/latest?userId=${userId}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch plan. Let\'s co-create one first.');
+        }
+        const data = await response.json();
+        setPlan(data.plan);
+        setSessions(data.sessions);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchPlan();
   }, [userId]);
 

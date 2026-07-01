@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 interface Message {
   sender: 'user' | 'coach';
@@ -8,7 +8,7 @@ interface Message {
 interface OnboardingChatProps {
   userId: string;
   setUserId: (id: string) => void;
-  onOnboardingComplete: () => void;
+  onOnboardingComplete: (nextState?: string) => void;
 }
 
 export const OnboardingChat: React.FC<OnboardingChatProps> = ({
@@ -16,12 +16,28 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({
   setUserId,
   onOnboardingComplete,
 }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    { sender: 'coach', text: "Welcome to Bloom! I'm here to support your self-directed learning. Let's start by learning about your goals. Ready to begin?" },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    userId
+      ? [
+          { sender: 'coach', text: "I've drafted a learning plan based on your onboarding profile. It includes 3 focus sessions scheduled throughout the week during your preferred times. Would you like to confirm this plan or make changes?" }
+        ]
+      : [
+          { sender: 'coach', text: "Welcome to Bloom! I'm here to support your self-directed learning. Let's start by learning about your goals. Ready to begin?" }
+        ]
+  );
   const [input, setInput] = useState('');
-  const [state, setState] = useState('ONBOARDING_S1');
+  const [state, setState] = useState(userId ? 'PLANNING' : 'ONBOARDING_S1');
   const [loading, setLoading] = useState(false);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading]);
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,11 +60,13 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({
         setUserId(data.userId);
       }
 
+      const wasOnboarding = state.startsWith('ONBOARDING_');
+
       setMessages((prev) => [...prev, { sender: 'coach', text: data.response }]);
       setState(data.state);
 
-      if (data.state === 'PLANNING') {
-        onOnboardingComplete();
+      if ((wasOnboarding && data.state === 'PLANNING') || data.state === 'ACTIVE_WEEK') {
+        onOnboardingComplete(data.state);
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -67,6 +85,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({
           </div>
         ))}
         {loading && <div className="message-bubble coach typing">...</div>}
+        <div ref={messagesEndRef} />
       </div>
       <form onSubmit={sendMessage} className="chat-input-form">
         <input

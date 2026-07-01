@@ -1,122 +1,182 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useState } from 'react';
+import { OnboardingChat } from './components/OnboardingChat';
+import { ProfileSummary } from './components/ProfileSummary';
+import { WeeklyPlanner } from './components/WeeklyPlanner';
+import { ReflectionPrompt } from './components/ReflectionPrompt';
+import { RecoveryModal } from './components/RecoveryModal';
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [userId, setUserId] = useState<string>('');
+  const [view, setView] = useState<'onboarding' | 'summary' | 'planner'>('onboarding');
+  const [showReflection, setShowReflection] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [reflectionPromptText] = useState('What went well in this session? What made starting feel easy?');
+
+  const handleOnboardingComplete = (nextState?: string) => {
+    if (nextState === 'ACTIVE_WEEK') {
+      setView('planner');
+    } else {
+      setView('summary');
+    }
+  };
+
+  const handleConfirmProfile = () => {
+    setView('onboarding');
+  };
+
+  const handleBackToChat = () => {
+    setView('onboarding');
+  };
+
+  const triggerReflection = () => {
+    setShowReflection(true);
+  };
+
+  const triggerRecovery = () => {
+    setShowRecovery(true);
+  };
+
+  const handleReflectionSubmit = async (responseText: string) => {
+    if (!userId) return alert('Please start onboarding first to generate a user profile.');
+    try {
+      await fetch('/api/reflection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          triggerType: 'session_completed',
+          promptText: reflectionPromptText,
+          responseText,
+          skipped: false,
+        }),
+      });
+      alert('Reflection saved successfully!');
+      setShowReflection(false);
+    } catch (error) {
+      console.error('Error saving reflection:', error);
+    }
+  };
+
+  const handleReflectionSkip = async () => {
+    if (!userId) return setShowReflection(false);
+    try {
+      await fetch('/api/reflection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          triggerType: 'session_completed',
+          promptText: reflectionPromptText,
+          responseText: '',
+          skipped: true,
+        }),
+      });
+      alert('Reflection skipped.');
+      setShowReflection(false);
+    } catch (error) {
+      console.error('Error skipping reflection:', error);
+    }
+  };
+
+  const handleRecoveryResolve = async () => {
+    if (!userId) return setShowRecovery(false);
+    try {
+      // Simulate posting the missed session recovery message in chat
+      setView('onboarding');
+      setShowRecovery(false);
+      // We instruct the user to type in chat or mock the flow
+      alert('Recovery flow initiated! Go ahead and let the coach know what got in the way of your session.');
+    } catch (error) {
+      console.error('Error initiating recovery:', error);
+    }
+  };
+
+  const handleReset = () => {
+    setUserId('');
+    setView('onboarding');
+    setShowRecovery(false);
+    setShowReflection(false);
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app-workspace">
+      {/* Sidebar Controls */}
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <h2>Bloom.</h2>
+          <p className="subtitle">AI Coaching Companion</p>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
+        <div className="sidebar-section">
+          <h3>Session Management</h3>
+          <div className="session-info">
+            <p><strong>User ID:</strong> <span className="mono">{userId || 'None (Start onboarding)'}</span></p>
+            <p><strong>View:</strong> <span className="mono">{view.toUpperCase()}</span></p>
+          </div>
+          {userId && (
+            <button onClick={handleReset} className="reset-btn">
+              Reset Onboarding
+            </button>
+          )}
         </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        <div className="sidebar-section">
+          <h3>Simulation Tools</h3>
+          <button onClick={triggerReflection} className="simulation-btn flex-btn" disabled={!userId}>
+            <span>Simulate Session Completed</span>
+          </button>
+          <button onClick={triggerRecovery} className="simulation-btn flex-btn" disabled={!userId}>
+            <span>Simulate Missed Session</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Container */}
+      <div className="main-content">
+        {showReflection && (
+          <div className="modal-overlay">
+            <ReflectionPrompt
+              promptText={reflectionPromptText}
+              onSubmit={handleReflectionSubmit}
+              onSkip={handleReflectionSkip}
+            />
+          </div>
+        )}
+
+        {showRecovery && (
+          <div className="modal-overlay">
+            <RecoveryModal onResolve={handleRecoveryResolve} />
+          </div>
+        )}
+
+        {view === 'onboarding' && (
+          <div className="chat-view">
+            <div className="view-header">
+              <h1>Coaching Chat</h1>
+              <p>Onboard and plan your learning goals with your AI companion.</p>
+            </div>
+            <OnboardingChat
+              userId={userId}
+              setUserId={setUserId}
+              onOnboardingComplete={handleOnboardingComplete}
+            />
+          </div>
+        )}
+
+        {view === 'summary' && (
+          <div className="summary-view">
+            <ProfileSummary onConfirm={handleConfirmProfile} />
+          </div>
+        )}
+
+        {view === 'planner' && (
+          <div className="planner-view">
+            <WeeklyPlanner userId={userId} onBackToChat={handleBackToChat} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
-export default App
+export default App;

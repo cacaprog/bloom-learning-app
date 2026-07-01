@@ -12,7 +12,15 @@ async function runMigrations() {
   }
   try {
     console.log('Running database migrations...');
-    const migrationsDir = path.join(__dirname, 'migrations');
+    let migrationsDir = path.join(__dirname, 'migrations');
+    if (!fs.existsSync(migrationsDir)) {
+      const srcMigrations = path.join(__dirname, '..', '..', 'src', 'db', 'migrations');
+      if (fs.existsSync(srcMigrations)) {
+        migrationsDir = srcMigrations;
+      } else {
+        throw new Error(`Migrations directory not found: tried ${migrationsDir} and ${srcMigrations}`);
+      }
+    }
     const files = fs.readdirSync(migrationsDir)
       .filter((file) => file.endsWith('.sql'))
       .sort();
