@@ -35,12 +35,15 @@ npm install
 
 ## 3. Configuration & Environment Variables
 
-Create a `.env` file in the `backend/` directory if you plan to connect to a real PostgreSQL instance:
+Create a `.env` file in the `backend/` directory if you plan to connect to a real PostgreSQL database or external services:
 
 ```env
 PORT=3000
 DATABASE_URL="postgresql://username:password@localhost:5432/bloom_coaching"
 NODE_ENV="development"
+
+# (Optional) Model Context Protocol Calendar URL (SSE or HTTP JSON-RPC endpoint)
+# e.g., MCP_CALENDAR_SERVER_URL="http://localhost:3001/"
 ```
 *Note: If `DATABASE_URL` is not provided, the database service automatically operates using an in-memory SQL mock, which is excellent for quick developer validation and testing.*
 
@@ -162,3 +165,20 @@ OPENAI_API_KEY="sk-..."
 
 If neither key is configured or set, the system will automatically default to local mock fallback replies.
 
+---
+
+## 9. Model Context Protocol (MCP) Calendar Integration
+
+Bloom supports syncing study session events directly to external calendars using the Model Context Protocol (MCP) or custom HTTP JSON-RPC calendar hosts.
+
+### Step 1: Configure Calendar Server URL
+Add the running calendar server address to `backend/.env`:
+```env
+MCP_CALENDAR_SERVER_URL="http://localhost:3001/"
+```
+*(If this variable is left empty or the server is unreachable, the system will gracefully fall back to mock local storage.)*
+
+### Step 2: Live Integration Flow
+* During the **Weekly Planning** phase, once a learning plan is finalized and agreed upon (either via conversation or `/confirm-plan`), the backend triggers calendar sync tool calls.
+* Events are dynamically created (using server-exposed tool names such as `create_event` or `create_calendar_event`).
+* If a session is deleted or rescheduled, the corresponding remote events are deleted/updated using `delete_event`.
