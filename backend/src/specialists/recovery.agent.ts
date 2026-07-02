@@ -39,7 +39,7 @@ export class RecoveryAgent {
     switch (currentStage) {
       case 'INITIATE':
         return {
-          response: promptService.getPrompt('recovery'),
+          response: "I noticed you missed your session. No judgment—life happens. What got in the way?",
           nextStage: 'EXPLORE',
           rescheduleNeeded: false,
         };

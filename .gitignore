@@ -10,3 +10,7 @@ specs/
 .agents/skills/
 .specify/
 
+# Internal docs
+jornada.md
+melhorias.md
+

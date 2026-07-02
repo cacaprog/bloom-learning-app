@@ -76,4 +76,32 @@ describe('Planning Integration Flow', () => {
     expect(events.length).toBe(3);
     expect(events[0].title).toContain('Study session');
   });
+
+  it('should support deterministic plan confirmation via /confirm-plan command bypass', async () => {
+    const testUserId = crypto.randomUUID();
+    await UserModel.create({ id: testUserId, email: 'command-test@bloom.edu' });
+    await LearnerProfileModel.create({
+      id: crypto.randomUUID(),
+      user_id: testUserId,
+      primary_goal: 'Music theory',
+      goal_category: 'art',
+      motivation_reasons: ['hobby'],
+      past_attempts: [],
+      barriers: [],
+      weekly_time_budget_hours: 3,
+      best_time: 'evening',
+      preferred_formats: ['practice'],
+      confidence_score: 9,
+      readiness_stage: 'action',
+      success_definition: 'Learn notes',
+    });
+
+    const res = await request(app)
+      .post('/api/chat')
+      .send({ userId: testUserId, message: '/confirm-plan', state: 'PLANNING' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.state).toBe('ACTIVE_WEEK');
+    expect(res.body.response).toContain('confirmed');
+  });
 });

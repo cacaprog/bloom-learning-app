@@ -12,6 +12,11 @@ function App() {
   const [showRecovery, setShowRecovery] = useState(false);
   const [reflectionPromptText] = useState('What went well in this session? What made starting feel easy?');
 
+  const [chatMessages, setChatMessages] = useState<any[]>(() => [
+    { sender: 'coach', text: "Welcome to Bloom! I'm here to support your self-directed learning. Let's start by learning about your goals. Ready to begin?" }
+  ]);
+  const [chatState, setChatState] = useState<string>('ONBOARDING_S1');
+
   const handleOnboardingComplete = (nextState?: string) => {
     if (nextState === 'ACTIVE_WEEK') {
       setView('planner');
@@ -21,6 +26,11 @@ function App() {
   };
 
   const handleConfirmProfile = () => {
+    setChatState('PLANNING');
+    setChatMessages((prev) => [
+      ...prev,
+      { sender: 'coach', text: "I've drafted a learning plan based on your onboarding profile. It includes 3 focus sessions scheduled throughout the week during your preferred times. Would you like to confirm this plan or make changes?" }
+    ]);
     setView('onboarding');
   };
 
@@ -81,10 +91,13 @@ function App() {
   const handleRecoveryResolve = async () => {
     if (!userId) return setShowRecovery(false);
     try {
-      // Simulate posting the missed session recovery message in chat
+      setChatState('RECOVERY_INITIATE');
+      setChatMessages((prev) => [
+        ...prev,
+        { sender: 'coach', text: "It looks like you missed your scheduled session. Showing up after a miss is what consistency actually looks like. Let me know what got in the way so we can adjust." }
+      ]);
       setView('onboarding');
       setShowRecovery(false);
-      // We instruct the user to type in chat or mock the flow
       alert('Recovery flow initiated! Go ahead and let the coach know what got in the way of your session.');
     } catch (error) {
       console.error('Error initiating recovery:', error);
@@ -93,6 +106,10 @@ function App() {
 
   const handleReset = () => {
     setUserId('');
+    setChatMessages([
+      { sender: 'coach', text: "Welcome to Bloom! I'm here to support your self-directed learning. Let's start by learning about your goals. Ready to begin?" }
+    ]);
+    setChatState('ONBOARDING_S1');
     setView('onboarding');
     setShowRecovery(false);
     setShowReflection(false);
@@ -158,6 +175,10 @@ function App() {
             <OnboardingChat
               userId={userId}
               setUserId={setUserId}
+              messages={chatMessages}
+              setMessages={setChatMessages}
+              state={chatState}
+              setState={setChatState}
               onOnboardingComplete={handleOnboardingComplete}
             />
           </div>

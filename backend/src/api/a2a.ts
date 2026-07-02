@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { requireA2AScope, AuthenticatedA2ARequest } from './auth.js';
 import { A2ATaskModel } from '../models/a2a.js';
 import { coordinatorService } from '../coordinator/coordinator.service.js';
+import { CoachMessageModel } from '../models/message.js';
 import crypto from 'crypto';
 
 const router = Router();
@@ -58,16 +59,41 @@ router.post(
       // 2. Transition to working
       await A2ATaskModel.updateState(taskId, 'working');
 
-      // 3. Delegate to Coordinator
+      // 3. Save incoming user message
+      await CoachMessageModel.create({
+        id: crypto.randomUUID(),
+        user_id: userId,
+        role: 'user',
+        mode: 'a2a',
+        state: 'PLANNING',
+        content: 'I confirm Option A',
+      });
+
+      // 4. Fetch history (limit to last 15 messages)
+      const history = await CoachMessageModel.findByUserId(userId);
+      const last15 = history.slice(-15);
+
+      // 5. Delegate to Coordinator
       const coordinatorResponse = await coordinatorService.processMessage(
         userId,
-        'I confirm Option A', // Trigger auto planning confirmation for task
+        'I confirm Option A',
         {
           userId,
           currentState: 'PLANNING',
-          lastMessages: [],
+          lastMessages: last15,
         }
       );
+
+      // 6. Save outgoing coach response
+      await CoachMessageModel.create({
+        id: crypto.randomUUID(),
+        user_id: userId,
+        role: 'coach',
+        mode: 'a2a',
+        state: coordinatorResponse.newState,
+        content: coordinatorResponse.responseToUser,
+        safety_check_passed: coordinatorResponse.safetyCheckPassed,
+      });
 
       if (coordinatorResponse.newState === 'ACTIVE_WEEK') {
         const weeklyPlanArtifact = {

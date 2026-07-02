@@ -42,21 +42,23 @@ export class OnboardingAgent {
     } else if (currentState === 'ONBOARDING_S4') {
       nextState = 'ONBOARDING_S5';
       const hoursMatch = text.match(/\b\d+\b/);
-      const hours = hoursMatch ? parseInt(hoursMatch[0]) : 5;
-      const bestTime = text.includes('morning') ? 'morning' : text.includes('evening') ? 'evening' : 'midday';
-      slotsFilled = {
-        weekly_time_budget_hours: hours,
-        best_time: bestTime,
-      };
+      const hours = hoursMatch ? parseInt(hoursMatch[0]) : undefined;
+      const bestTime = text.includes('morning') ? 'morning' : text.includes('evening') ? 'evening' : text.includes('midday') ? 'midday' : undefined;
+      
+      slotsFilled = {};
+      if (hours !== undefined) slotsFilled.weekly_time_budget_hours = hours;
+      if (bestTime !== undefined) slotsFilled.best_time = bestTime;
     } else if (currentState === 'ONBOARDING_S5') {
       nextState = 'ONBOARDING_S6';
       const confMatch = text.match(/\b\d+\b/);
-      const score = confMatch ? parseInt(confMatch[0]) : 7;
-      slotsFilled = {
-        confidence_score: score,
-        readiness_stage: score >= 7 ? 'action' : 'preparation',
-        success_definition: 'Complete weekly learning sessions consistently',
-      };
+      const score = confMatch ? parseInt(confMatch[0]) : undefined;
+      
+      slotsFilled = {};
+      if (score !== undefined) {
+        slotsFilled.confidence_score = score;
+        slotsFilled.readiness_stage = score >= 7 ? 'action' : 'preparation';
+      }
+      slotsFilled.success_definition = 'Complete weekly learning sessions consistently';
     } else if (currentState === 'ONBOARDING_S6') {
       nextState = 'PLANNING';
     }

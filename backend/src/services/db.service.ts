@@ -174,6 +174,30 @@ async function mockQuery(text: string, params?: any[]) {
     return { rows: entries };
   }
 
+  if (queryText.includes('insert into coach_messages')) {
+    const msg = {
+      id: params![0],
+      user_id: params![1],
+      session_id: params![2] || null,
+      role: params![3],
+      agent_id: params![4] || null,
+      mode: params![5],
+      state: params![6],
+      strategy: params![7] || null,
+      content: params![8],
+      safety_check_passed: params![9] !== undefined ? params![9] : true,
+      created_at: new Date(),
+    };
+    tables.coach_messages.push(msg);
+    return { rows: [msg] };
+  }
+
+  if (queryText.includes('select * from coach_messages where user_id =')) {
+    const messages = tables.coach_messages.filter((m) => m.user_id === params![0]);
+    messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return { rows: messages };
+  }
+
   if (queryText.includes('delete from')) {
     const userId = params![0];
     tables.users = tables.users.filter((u) => u.id !== userId);
@@ -183,6 +207,7 @@ async function mockQuery(text: string, params?: any[]) {
     tables.weekly_plans = tables.weekly_plans.filter((p) => p.user_id !== userId);
     tables.learning_sessions = tables.learning_sessions.filter((s) => !planIds.includes(s.plan_id));
     tables.reflection_entries = tables.reflection_entries.filter((r) => r.user_id !== userId);
+    tables.coach_messages = tables.coach_messages.filter((m) => m.user_id !== userId);
     return { rows: [] };
   }
 

@@ -8,25 +8,23 @@ interface Message {
 interface OnboardingChatProps {
   userId: string;
   setUserId: (id: string) => void;
+  messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  state: string;
+  setState: React.Dispatch<React.SetStateAction<string>>;
   onOnboardingComplete: (nextState?: string) => void;
 }
 
 export const OnboardingChat: React.FC<OnboardingChatProps> = ({
   userId,
   setUserId,
+  messages,
+  setMessages,
+  state,
+  setState,
   onOnboardingComplete,
 }) => {
-  const [messages, setMessages] = useState<Message[]>(() =>
-    userId
-      ? [
-          { sender: 'coach', text: "I've drafted a learning plan based on your onboarding profile. It includes 3 focus sessions scheduled throughout the week during your preferred times. Would you like to confirm this plan or make changes?" }
-        ]
-      : [
-          { sender: 'coach', text: "Welcome to Bloom! I'm here to support your self-directed learning. Let's start by learning about your goals. Ready to begin?" }
-        ]
-  );
   const [input, setInput] = useState('');
-  const [state, setState] = useState(userId ? 'PLANNING' : 'ONBOARDING_S1');
   const [loading, setLoading] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -65,7 +63,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({
       setMessages((prev) => [...prev, { sender: 'coach', text: data.response }]);
       setState(data.state);
 
-      if ((wasOnboarding && data.state === 'PLANNING') || data.state === 'ACTIVE_WEEK') {
+      if ((wasOnboarding && data.state === 'PLANNING') || (state === 'PLANNING' && data.state === 'ACTIVE_WEEK')) {
         onOnboardingComplete(data.state);
       }
     } catch (error) {

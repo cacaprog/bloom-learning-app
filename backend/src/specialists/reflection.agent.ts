@@ -14,11 +14,6 @@ export class ReflectionAgent {
       return await llmService.generate('reflection', `Trigger Type: ${triggerType}`);
     }
 
-    const loadedPrompt = promptService.getPrompt('reflection');
-    if (loadedPrompt.includes('win') || loadedPrompt.includes('win this week')) {
-      return loadedPrompt;
-    }
-
     switch (triggerType) {
       case 'session_completion':
         return 'What went well in this session? What made starting feel easy?';

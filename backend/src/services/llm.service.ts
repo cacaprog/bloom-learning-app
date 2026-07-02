@@ -3,7 +3,10 @@ import { OpenAI } from 'openai';
 import { promptService } from './prompt.service.js';
 
 export class LlmService {
-  public getProvider(): 'gemini' | 'openai' | 'mock' {
+  public getProvider(): 'gemini' | 'openai' | 'ollama' | 'mock' {
+    if (process.env.OLLAMA_MODEL) {
+      return 'ollama';
+    }
     if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'mock-gemini-key') {
       return 'gemini';
     }
@@ -13,9 +16,11 @@ export class LlmService {
     return 'mock';
   }
 
-  public async generate(agentKey: string, userMessage: string): Promise<string> {
+  public async generate(agentKeyOrPrompt: string, userMessage: string, history: any[] = []): Promise<string> {
     const provider = this.getProvider();
-    const systemPrompt = promptService.getPrompt(agentKey);
+    const isKey = ['onboarding', 'planning', 'recovery', 'reflection'].includes(agentKeyOrPrompt);
+    const agentKey = isKey ? agentKeyOrPrompt : 'planning';
+    const systemPrompt = isKey ? promptService.getPrompt(agentKeyOrPrompt) : agentKeyOrPrompt;
 
     if (provider === 'gemini') {
       try {
@@ -25,7 +30,19 @@ export class LlmService {
           model: modelName,
           systemInstruction: systemPrompt,
         });
-        const result = await model.generateContent(userMessage);
+
+        let result;
+        if (history && history.length > 0) {
+          const geminiHistory = history.map(h => ({
+            role: h.role === 'coach' ? 'model' : 'user',
+            parts: [{ text: h.content }]
+          }));
+          const chat = model.startChat({ history: geminiHistory });
+          result = await chat.sendMessage(userMessage);
+        } else {
+          result = await model.generateContent(userMessage);
+        }
+
         return result.response.text().trim();
       } catch (err) {
         console.error('Gemini API call failed, falling back to mock:', err);
@@ -34,16 +51,46 @@ export class LlmService {
     } else if (provider === 'openai') {
       try {
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+        const mappedHistory = (history || []).map(h => ({
+          role: (h.role === 'coach' ? 'assistant' : 'user') as 'assistant' | 'user',
+          content: h.content
+        }));
         const completion = await openai.chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
             { role: 'system', content: systemPrompt },
+            ...mappedHistory,
             { role: 'user', content: userMessage }
           ]
         });
         return (completion.choices[0]?.message?.content || '').trim();
       } catch (err) {
         console.error('OpenAI API call failed, falling back to mock:', err);
+        return this.getMockResponse(agentKey, userMessage);
+      }
+    } else if (provider === 'ollama') {
+      try {
+        const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
+        const modelName = process.env.OLLAMA_MODEL || 'qwen3.5:latest';
+        const openai = new OpenAI({
+          apiKey: 'ollama',
+          baseURL: ollamaBaseUrl,
+        });
+        const mappedHistory = (history || []).map(h => ({
+          role: (h.role === 'coach' ? 'assistant' : 'user') as 'assistant' | 'user',
+          content: h.content
+        }));
+        const completion = await openai.chat.completions.create({
+          model: modelName,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...mappedHistory,
+            { role: 'user', content: userMessage }
+          ]
+        });
+        return (completion.choices[0]?.message?.content || '').trim();
+      } catch (err) {
+        console.error('Ollama API call failed, falling back to mock:', err);
         return this.getMockResponse(agentKey, userMessage);
       }
     } else {
@@ -83,12 +130,18 @@ export class LlmService {
         if (text.includes('yes') || text.includes('sure') || text.includes('please')) {
           return 'Great! Rescheduled the session for tomorrow at the same time. Showing up after a miss is what consistency actually looks like.';
         }
-        return promptService.getPrompt('recovery');
+        return "I noticed you missed your session. No judgment—life happens. What got in the way?";
       case 'reflection':
         if (text.includes('skip') || text.includes('dismiss')) {
           return 'skip';
         }
-        return promptService.getPrompt('reflection');
+        if (text.includes('weekly_review')) {
+          return 'What felt like a win this week? What rhythm worked best?';
+        }
+        if (text.includes('recovery_completion')) {
+          return 'Showing up after a miss is key. What helped you return today?';
+        }
+        return 'What went well in this session? What made starting feel easy?';
       default:
         return "I'm ready to assist you. What can I help with?";
     }

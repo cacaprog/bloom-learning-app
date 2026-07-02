@@ -115,7 +115,7 @@ export class CoordinatorService {
           }
         } else if (agentDelegation.agent === 'planning') {
           const profile = await LearnerProfileModel.findByUserId(userId);
-          const planningResult = await planningAgent.processTurn(userMessage, profile, []);
+          const planningResult = await planningAgent.processTurn(userMessage, profile, context.lastMessages || []);
           responseToUser = planningResult.response;
 
           if (planningResult.confirmed && planningResult.proposedPlan) {
