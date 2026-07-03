@@ -101,3 +101,17 @@ CREATE TABLE IF NOT EXISTS a2a_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_a2a_tasks_user ON a2a_tasks(user_id);
+
+-- Create TelemetryEvents table
+CREATE TABLE IF NOT EXISTS telemetry_events (
+  id UUID PRIMARY KEY,
+  event_type VARCHAR(50) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  provider VARCHAR(50) NOT NULL,
+  duration_ms NUMERIC NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  input_tokens INTEGER DEFAULT 0,
+  output_tokens INTEGER DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+

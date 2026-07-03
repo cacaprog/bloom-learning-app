@@ -10,6 +10,7 @@ const tables: Record<string, any[]> = {
   agent_delegations: [],
   a2a_tasks: [],
   reflection_entries: [],
+  telemetry_events: [],
 };
 
 async function mockQuery(text: string, params?: any[]) {
@@ -198,16 +199,43 @@ async function mockQuery(text: string, params?: any[]) {
     return { rows: messages };
   }
 
+  if (queryText.includes('insert into telemetry_events')) {
+    const event = {
+      id: params![0],
+      event_type: params![1],
+      name: params![2],
+      provider: params![3],
+      duration_ms: params![4],
+      status: params![5],
+      input_tokens: params![6] !== undefined ? params![6] : 0,
+      output_tokens: params![7] !== undefined ? params![7] : 0,
+      created_at: new Date(),
+    };
+    tables.telemetry_events.push(event);
+    return { rows: [event] };
+  }
+
+  if (queryText.includes('select * from telemetry_events')) {
+    return { rows: tables.telemetry_events };
+  }
+
+  if (queryText.includes('delete from telemetry_events')) {
+    tables.telemetry_events = [];
+    return { rows: [] };
+  }
+
   if (queryText.includes('delete from')) {
-    const userId = params![0];
-    tables.users = tables.users.filter((u) => u.id !== userId);
-    tables.learner_profiles = tables.learner_profiles.filter((p) => p.user_id !== userId);
-    const userPlans = tables.weekly_plans.filter((p) => p.user_id === userId);
-    const planIds = userPlans.map((p) => p.id);
-    tables.weekly_plans = tables.weekly_plans.filter((p) => p.user_id !== userId);
-    tables.learning_sessions = tables.learning_sessions.filter((s) => !planIds.includes(s.plan_id));
-    tables.reflection_entries = tables.reflection_entries.filter((r) => r.user_id !== userId);
-    tables.coach_messages = tables.coach_messages.filter((m) => m.user_id !== userId);
+    const userId = params ? params[0] : null;
+    if (userId) {
+      tables.users = tables.users.filter((u) => u.id !== userId);
+      tables.learner_profiles = tables.learner_profiles.filter((p) => p.user_id !== userId);
+      const userPlans = tables.weekly_plans.filter((p) => p.user_id === userId);
+      const planIds = userPlans.map((p) => p.id);
+      tables.weekly_plans = tables.weekly_plans.filter((p) => p.user_id !== userId);
+      tables.learning_sessions = tables.learning_sessions.filter((s) => !planIds.includes(s.plan_id));
+      tables.reflection_entries = tables.reflection_entries.filter((r) => r.user_id !== userId);
+      tables.coach_messages = tables.coach_messages.filter((m) => m.user_id !== userId);
+    }
     return { rows: [] };
   }
 

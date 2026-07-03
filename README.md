@@ -109,4 +109,17 @@ cd ../frontend
 npm run dev
 ```
 
-For detailed deployment parameters, database migration commands, and API verification cURLs, check out the [Bloom Coaching Core Runbook](file:///home/cairo/code/bloom-learning/my-project/runbook.md).
+---
+
+## 4. Telemetry & Performance Monitoring
+
+Bloom includes built-in logging and database persistence of performance metrics:
+* **HTTP Latency:** Traced globally for all request-response cycles.
+* **LLM Token Tracking:** Captures prompt and output token consumption for Google Gemini (`usageMetadata`) and OpenAI (`usage`) providers.
+* **MCP Tool Latency:** Records the handshake and invocation times for external tools.
+* **Endpoints:**
+  * `GET /api/telemetry`: Retrieve stored performance and token usage history.
+  * `DELETE /api/telemetry`: Clear history logs.
+
+For detailed deployment parameters, database migration commands, and API verification cURLs, check out the [Bloom Coaching Core Runbook](runbook.md).
+

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "google-calendar": {
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "cwd": "/home/cairo/code/bloom-learning/my-project/mcp-google-calendar"
+    }
+  }
+}

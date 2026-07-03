@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { TelemetryModel } from '../models/telemetry.js';
+
 
 export interface CalendarEvent {
   id: string;
@@ -87,6 +89,7 @@ export class CalendarService {
     if (sseUrl) {
       const client = await this.getMcpClient();
       if (client) {
+        const startMcp = process.hrtime();
         try {
           await client.callTool({
             name: this.toolNames.create,
@@ -96,6 +99,18 @@ export class CalendarService {
               end: end.toISOString(),
             },
           });
+          const diff = process.hrtime(startMcp);
+          const duration = (diff[0] * 1e9 + diff[1]) / 1e6;
+          console.log(`[Telemetry] MCP Tool Call "${this.toolNames.create}" - Duration: ${duration.toFixed(2)}ms`);
+          
+          TelemetryModel.create({
+            event_type: 'mcp_tool_call',
+            name: this.toolNames.create,
+            provider: 'mcp-google-calendar',
+            duration_ms: Number(duration.toFixed(2)),
+            status: 'success',
+          }).catch(err => console.error('[Telemetry] Failed to save createEvent tool call log:', err));
+
           console.log(`[MCP Calendar] Successfully synced to external calendar via tool "${this.toolNames.create}"`);
           synced = true;
         } catch (err) {
@@ -142,6 +157,7 @@ export class CalendarService {
       let mcpDeleted = false;
       const client = await this.getMcpClient();
       if (client) {
+        const startMcp = process.hrtime();
         try {
           await client.callTool({
             name: this.toolNames.delete,
@@ -150,6 +166,18 @@ export class CalendarService {
               title: event.title,
             },
           });
+          const diff = process.hrtime(startMcp);
+          const duration = (diff[0] * 1e9 + diff[1]) / 1e6;
+          console.log(`[Telemetry] MCP Tool Call "${this.toolNames.delete}" - Duration: ${duration.toFixed(2)}ms`);
+          
+          TelemetryModel.create({
+            event_type: 'mcp_tool_call',
+            name: this.toolNames.delete,
+            provider: 'mcp-google-calendar',
+            duration_ms: Number(duration.toFixed(2)),
+            status: 'success',
+          }).catch(err => console.error('[Telemetry] Failed to save deleteEvent tool call log:', err));
+
           console.log(`[MCP Calendar] Successfully deleted external calendar event via tool "${this.toolNames.delete}"`);
           mcpDeleted = true;
         } catch (err) {
