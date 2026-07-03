@@ -61,4 +61,15 @@ describe('PlanningAgent Unit Tests', () => {
     expect(resultConfirm.confirmed).toBe(true);
     expect(resultConfirm.response).toBe('Plain text response from LLM');
   });
+
+  it('should clean and parse LLM JSON responses wrapped in markdown code blocks', async () => {
+    (llmService.getProvider as jest.Mock).mockReturnValue('openai');
+    (llmService.generate as jest.Mock).mockResolvedValue(
+      '```json\n{\n  "response": "Custom cleaned LLM response",\n  "confirmed": false\n}\n```'
+    );
+
+    const result = await planningAgent.processTurn('suggest plans', profile, []);
+    expect(result.confirmed).toBe(false);
+    expect(result.response).toBe('Custom cleaned LLM response');
+  });
 });

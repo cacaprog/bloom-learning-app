@@ -28,6 +28,11 @@ export class CalendarService {
     }
 
     try {
+      if (typeof globalThis.EventSource === 'undefined') {
+        const { default: EventSource } = await import('eventsource');
+        (globalThis as any).EventSource = EventSource;
+      }
+
       const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
       const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
 

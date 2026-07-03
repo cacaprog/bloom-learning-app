@@ -70,7 +70,7 @@ async function main() {
     const hasToken = setupRefreshToken();
     
     // Get an available port
-    const PORT = await getAvailablePort();
+    const PORT = await getAvailablePort(3001);
     console.error(`Found available port: ${PORT}`);
 
     // Initialize Google Calendar provider
