@@ -42,4 +42,67 @@ describe('LlmService Unit Tests', () => {
     const reply = await llmService.generate('reflection', 'Hello');
     expect(reply).toContain('What went well in this session');
   });
+
+  describe('generateWithTools', () => {
+    beforeEach(() => {
+      delete process.env.GEMINI_API_KEY;
+      delete process.env.OPENAI_API_KEY;
+    });
+
+    it('should return a tool_call for planning tools when message contains confirmation keyword', async () => {
+      const tools = [
+        { name: 'get_free_busy', description: 'Check availability', parameters: { type: 'object', properties: {} } },
+        { name: 'confirm_plan', description: 'Confirm sessions', parameters: { type: 'object', properties: {} } },
+      ];
+      const messages = [{ role: 'user' as const, content: 'yes, confirm that plan' }];
+
+      const result = await llmService.generateWithTools('System prompt', messages, tools);
+
+      expect(result.type).toBe('tool_call');
+      expect(result).toHaveProperty('name');
+    });
+
+    it('should return text response for planning tools when no confirmation keyword', async () => {
+      const tools = [
+        { name: 'get_free_busy', description: 'Check availability', parameters: { type: 'object', properties: {} } },
+        { name: 'confirm_plan', description: 'Confirm sessions', parameters: { type: 'object', properties: {} } },
+      ];
+      const messages = [{ role: 'user' as const, content: 'suggest some options' }];
+
+      const result = await llmService.generateWithTools('System prompt', messages, tools);
+
+      expect(result.type).toBe('text');
+      expect((result as any).content).toBeTruthy();
+    });
+
+    it('should delegate to appropriate agent in coordinator mode on first call', async () => {
+      const tools = [
+        { name: 'delegate', description: 'Delegate to specialist', parameters: { type: 'object', properties: {} } },
+        { name: 'respond', description: 'Respond directly', parameters: { type: 'object', properties: {} } },
+      ];
+      const messages = [{ role: 'user' as const, content: 'help me plan my week' }];
+
+      const result = await llmService.generateWithTools('State: PLANNING', messages, tools);
+
+      expect(result.type).toBe('tool_call');
+      expect((result as any).name).toBe('delegate');
+    });
+
+    it('should return respond tool_call after delegation result in coordinator mode', async () => {
+      const tools = [
+        { name: 'delegate', description: 'Delegate', parameters: { type: 'object', properties: {} } },
+        { name: 'respond', description: 'Respond', parameters: { type: 'object', properties: {} } },
+      ];
+      const messages = [
+        { role: 'user' as const, content: 'help me plan' },
+        { role: 'assistant' as const, content: '', toolCall: { id: 'c1', name: 'delegate', args: { agent: 'planning' } } },
+        { role: 'tool' as const, content: JSON.stringify({ response: 'Here are your options', suggested_state: 'PLANNING' }), toolCallId: 'c1', toolName: 'delegate' }
+      ];
+
+      const result = await llmService.generateWithTools('State: PLANNING', messages, tools);
+
+      expect(result.type).toBe('tool_call');
+      expect((result as any).name).toBe('respond');
+    });
+  });
 });

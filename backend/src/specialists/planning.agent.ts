@@ -1,6 +1,6 @@
 import { promptService } from '../services/prompt.service.js';
-import { llmService } from '../services/llm.service.js';
-import { cleanJsonMarkdown } from '../utils/json.js';
+import { llmService, ToolDefinition, ToolMessage } from '../services/llm.service.js';
+import { calendarService } from '../services/calendar.service.js';
 
 export interface PlanningResult {
   response: string;
@@ -12,230 +12,208 @@ export interface PlanningResult {
       scheduled_at: Date;
       format: string;
       effort_level: string;
+      calendar_event_id: string;
     }[];
   };
   confirmed: boolean;
 }
 
-function extractSpecificDays(text: string): number[] {
-  const dayMap: Record<string, number> = {
-    'monday': 1, 'mon': 1,
-    'tuesday': 2, 'tues': 2, 'tue': 2,
-    'wednesday': 3, 'wed': 3,
-    'thursday': 4, 'thurs': 4, 'thu': 4,
-    'friday': 5, 'fri': 5,
-    'saturday': 6, 'sat': 6,
-    'sunday': 0, 'sun': 0
-  };
-
-  const foundDays: number[] = [];
-  for (const [dayName, dayIndex] of Object.entries(dayMap)) {
-    const regex = new RegExp(`\\b${dayName}\\b`, 'i');
-    if (regex.test(text)) {
-      if (!foundDays.includes(dayIndex)) {
-        foundDays.push(dayIndex);
-      }
-    }
-  }
-  return foundDays.sort((a, b) => a - b);
+interface RawSession {
+  title: string;
+  scheduled_at: string;
+  duration_minutes: number;
 }
 
-function parseSessionPreferences(history: any[], currentMessage: string) {
-  const allTexts = [currentMessage, ...history.map(h => h.content).reverse()];
-  
-  for (const text of allTexts) {
-    const lower = text.toLowerCase();
-    
-    // Check for patterns like: "2 days", "3 sessions", "twice a week"
-    const daysMatch = lower.match(/\b(\d+)\s*(?:day|session|time)s?\b/);
-    if (daysMatch) {
-      const count = parseInt(daysMatch[1], 10);
-      if (count >= 1 && count <= 7) {
-        return { sessionCount: count, preferredDays: extractSpecificDays(lower) };
-      }
+const PLANNING_TOOLS: ToolDefinition[] = [
+  {
+    name: 'get_free_busy',
+    description: 'Get calendar availability for the next 7 days in 30-minute slots. Use this before proposing sessions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        week_start: { type: 'string', description: 'ISO date for start of week (optional, defaults to today)' }
+      },
+      required: []
     }
-    
-    if (lower.includes('twice a week') || lower.includes('2x a week') || lower.includes('2x/week')) {
-      return { sessionCount: 2, preferredDays: extractSpecificDays(lower) };
+  },
+  {
+    name: 'list_upcoming',
+    description: 'List already-scheduled learning sessions to avoid double-booking.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max sessions to return (default 10)' }
+      },
+      required: []
     }
-    if (lower.includes('thrice a week') || lower.includes('3x a week') || lower.includes('3x/week')) {
-      return { sessionCount: 3, preferredDays: extractSpecificDays(lower) };
+  },
+  {
+    name: 'propose_sessions',
+    description: 'Commit to specific session times and present them to the learner. No calendar write yet — waits for learner confirmation. Use this to lock in specific times before asking the learner to confirm.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sessions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              scheduled_at: { type: 'string', description: 'ISO datetime, e.g. 2026-07-08T19:00:00' },
+              duration_minutes: { type: 'number', description: '15–90' }
+            },
+            required: ['title', 'scheduled_at', 'duration_minutes']
+          }
+        }
+      },
+      required: ['sessions']
     }
-    if (lower.includes('once a week') || lower.includes('1x a week') || lower.includes('1x/week')) {
-      return { sessionCount: 1, preferredDays: extractSpecificDays(lower) };
-    }
-
-    const specificDays = extractSpecificDays(lower);
-    if (specificDays.length > 0) {
-      return { sessionCount: specificDays.length, preferredDays: specificDays };
+  },
+  {
+    name: 'confirm_plan',
+    description: 'Write confirmed sessions to the calendar. Only call this after the learner has explicitly agreed. Provide the same sessions that were proposed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        weekly_goal: { type: 'string', description: 'Short description of the weekly learning goal' },
+        sessions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              scheduled_at: { type: 'string', description: 'ISO datetime' },
+              duration_minutes: { type: 'number' }
+            },
+            required: ['title', 'scheduled_at', 'duration_minutes']
+          }
+        }
+      },
+      required: ['weekly_goal', 'sessions']
     }
   }
-
-  return { sessionCount: 3, preferredDays: [] };
-}
-
-function getNextDayOfWeek(dayOfWeek: number, referenceDate: Date = new Date()): Date {
-  const resultDate = new Date(referenceDate);
-  const currentDay = resultDate.getDay();
-  let daysToAdd = (dayOfWeek - currentDay + 7) % 7;
-  if (daysToAdd === 0) {
-    daysToAdd = 7;
-  }
-  resultDate.setDate(resultDate.getDate() + daysToAdd);
-  return resultDate;
-}
+];
 
 export class PlanningAgent {
   public async processTurn(
     message: string,
     profile: any,
-    planningHistory: any[]
+    planningHistory: any[],
+    memoryContext = ''
   ): Promise<PlanningResult> {
-    const text = message.toLowerCase();
-    const provider = llmService.getProvider();
-    const goal = profile?.primary_goal || 'Goal';
-    // 1. Propose or confirm plan details
-    const budget = profile?.weekly_time_budget_hours || 6;
-    const { sessionCount, preferredDays } = parseSessionPreferences(planningHistory, message);
-    const duration = Math.round((budget * 60) / sessionCount);
-
+    const goal = profile?.primary_goal || 'your learning goal';
+    const budget = profile?.weekly_time_budget_hours || 5;
     const bestTime = profile?.best_time || 'evening';
-    let targetHour = 19; // default evening (7 PM)
-    if (bestTime === 'morning') {
-      targetHour = 9; // 9 AM
-    } else if (bestTime === 'midday') {
-      targetHour = 13; // 1 PM
-    }
 
-    const dayNames = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
-    let formattedDays = preferredDays.map(d => dayNames[d]).join(' and ');
-    if (preferredDays.length === 0) {
-      const fallbacks = [1, 3, 5];
-      formattedDays = fallbacks.slice(0, sessionCount).map(d => dayNames[d]).join(', ');
-    }
-
-    // 2. Build parameterized prompt with strict constraints
     const systemPrompt = promptService.getPrompt('planning')
       .replace(/{primary_goal}/g, goal)
       .replace(/{weekly_time_budget_hours}/g, String(budget))
-      .replace(/{session_count}/g, String(sessionCount))
-      .replace(/{session_duration_minutes}/g, String(duration))
-      .replace(/{preferred_days}/g, formattedDays)
-      .replace(/{best_time}/g, bestTime);
+      .replace(/{best_time}/g, bestTime)
+      .replace(/{learner_context}/g, memoryContext);
 
-    const isCommandBypass = text.includes('/confirm-plan') || text.includes('i confirm the plan');
+    const messages: ToolMessage[] = [
+      ...planningHistory.map(h => ({
+        role: (h.role === 'coach' ? 'assistant' : 'user') as 'user' | 'assistant',
+        content: h.content
+      })),
+      { role: 'user' as const, content: message }
+    ];
 
-    // Find the latest onboarding completion message index in history if any
-    const lastOnboardingIndex = planningHistory.map(h => h.content.toLowerCase()).lastIndexOf(
-      planningHistory.map(h => h.content.toLowerCase()).find(c => 
-        c.includes('personalized learning path') || 
-        c.includes('co-creating your weekly plan') ||
-        c.includes('learning path is ready')
-      ) || ''
-    );
+    for (let i = 0; i < 5; i++) {
+      const result = await llmService.generateWithTools(systemPrompt, messages, PLANNING_TOOLS);
 
-    const hasTransitionedFromOnboarding = lastOnboardingIndex !== -1;
-
-    // Check if options were proposed after the onboarding transition
-    const optionsProposed = planningHistory.slice(lastOnboardingIndex + 1).some(h => 
-      h.role === 'coach' && 
-      (
-        h.content.toLowerCase().includes('option a') || 
-        h.content.toLowerCase().includes('option b') || 
-        h.content.toLowerCase().includes('style') ||
-        h.content.toLowerCase().includes('choose either') ||
-        h.content.toLowerCase().includes('which style')
-      )
-    ) || 
-    text.includes('option a') || 
-    text.includes('option b');
-
-    let isConfirmed = (text.includes('confirm') || text.includes('yes') || text.includes('agree')) && 
-                      (isCommandBypass || optionsProposed || !hasTransitionedFromOnboarding);
-
-    const sessions = Array.from({ length: sessionCount }).map((_, i) => {
-      let scheduledDate: Date;
-      if (preferredDays.length > 0) {
-        const dayOfWeek = preferredDays[i % preferredDays.length];
-        const weeksToAdd = Math.floor(i / preferredDays.length);
-        scheduledDate = getNextDayOfWeek(dayOfWeek);
-        if (weeksToAdd > 0) {
-          scheduledDate.setDate(scheduledDate.getDate() + weeksToAdd * 7);
-        }
-      } else {
-        scheduledDate = new Date();
-        scheduledDate.setDate(scheduledDate.getDate() + (i + 1) * 2);
+      if (result.type === 'text') {
+        return { response: result.content, confirmed: false };
       }
-      scheduledDate.setHours(targetHour, 0, 0, 0);
-      return {
-        topic: `Study session ${i + 1} for ${goal}`,
-        duration_minutes: duration,
-        scheduled_at: scheduledDate,
-        format: 'practice',
-        effort_level: 'moderate',
-      };
-    });
 
-    sessions.sort((a, b) => a.scheduled_at.getTime() - b.scheduled_at.getTime());
-    sessions.forEach((s, idx) => {
-      s.topic = `Study session ${idx + 1} for ${goal}`;
-    });
+      if (result.name === 'confirm_plan') {
+        const rawSessions = result.args.sessions as RawSession[];
+        const weeklyGoal = (result.args.weekly_goal as string) || `Complete study for ${goal}`;
 
-    // 3. Build mock outputs for test/mock modes using the required JSON schema
-    const mockConfirmJson = JSON.stringify({
-      response: `Excellent! I have confirmed your weekly plan with ${sessionCount} sessions (${duration} mins each). I've synced this to your calendar. Ready to go!`,
-      confirmed: true
-    });
+        const sessionsWithIds = await Promise.all(
+          rawSessions.map(async s => {
+            const scheduledAt = new Date(s.scheduled_at);
+            const eventId = await calendarService.createEvent(s.title, scheduledAt, s.duration_minutes);
+            return {
+              topic: s.title,
+              duration_minutes: s.duration_minutes,
+              scheduled_at: scheduledAt,
+              format: 'practice' as const,
+              effort_level: 'moderate' as const,
+              calendar_event_id: eventId
+            };
+          })
+        );
 
-    const mockPlanJson = JSON.stringify({
-      response: `Based on your budget, here's a starting point for studying ${goal}: Option A: Three 2-hour sessions on evenings, or Option B: Four 1.5-hour sessions on mornings. Which style fits best for you?`,
+        const count = sessionsWithIds.length;
+        const confirmationText = `Your plan is confirmed — ${count} session${count !== 1 ? 's' : ''} added to your calendar.`;
+
+        return {
+          response: confirmationText,
+          confirmed: true,
+          proposedPlan: { weekly_goal: weeklyGoal, sessions: sessionsWithIds }
+        };
+      }
+
+      const toolResult = await this.executeTool(result.name, result.args, goal);
+
+      messages.push({
+        role: 'assistant',
+        content: '',
+        toolCall: { id: result.id, name: result.name, args: result.args }
+      });
+      messages.push({
+        role: 'tool',
+        content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult),
+        toolCallId: result.id,
+        toolName: result.name
+      });
+    }
+
+    return {
+      response: `Let's work on getting your ${goal} sessions scheduled. What days and times tend to work best for you this week?`,
       confirmed: false
-    });
-
-    // 4. Resolve raw response text
-    let rawResponse = '';
-    if (isConfirmed) {
-      rawResponse = provider !== 'mock'
-        ? await llmService.generate(systemPrompt, `User has confirmed scheduling: ${message}`, planningHistory)
-        : mockConfirmJson;
-    } else {
-      rawResponse = provider !== 'mock'
-        ? await llmService.generate(systemPrompt, message, planningHistory)
-        : mockPlanJson;
-    }
-
-    // 5. Parse response JSON and extract intent
-    let parsed: { response: string; confirmed: boolean };
-    const cleanedResponse = cleanJsonMarkdown(rawResponse);
-    try {
-      parsed = JSON.parse(cleanedResponse);
-    } catch (e) {
-      console.warn('PlanningAgent failed to parse LLM response as JSON, falling back:', rawResponse);
-      parsed = {
-        response: rawResponse,
-        confirmed: isConfirmed
-      };
-    }
-
-    const result: PlanningResult = {
-      response: parsed.response,
-      confirmed: parsed.confirmed
     };
+  }
 
-    // Enforce that a plan cannot be confirmed unless options were already proposed, or the user bypassed via command
-    if (result.confirmed && hasTransitionedFromOnboarding && !optionsProposed && !isCommandBypass) {
-      result.confirmed = false;
-      console.log('[PlanningAgent] Overrode LLM confirmed=true because no options were proposed in history yet.');
+  private async executeTool(name: string, args: Record<string, unknown>, goal: string): Promise<unknown> {
+    switch (name) {
+      case 'get_free_busy': {
+        const weekStart = args.week_start ? new Date(args.week_start as string) : undefined;
+        const slots = await calendarService.getFreeBusy(weekStart);
+        const availableCount = slots.filter(s => s.available).length;
+        return { slots, note: `${availableCount} of ${slots.length} half-hour slots are available this week.` };
+      }
+      case 'list_upcoming': {
+        const limit = (args.limit as number) || 10;
+        const events = await calendarService.listUpcoming(limit);
+        return {
+          sessions: events.map(e => ({
+            title: e.title,
+            start: e.start.toISOString(),
+            end: e.end.toISOString()
+          }))
+        };
+      }
+      case 'propose_sessions': {
+        const sessions = args.sessions as RawSession[];
+        return {
+          proposed: sessions.map(s => {
+            const dt = new Date(s.scheduled_at);
+            return {
+              title: s.title,
+              scheduled_at: s.scheduled_at,
+              duration_minutes: s.duration_minutes,
+              day: dt.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+              time: dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+            };
+          }),
+          note: 'Sessions proposed. Present these to the learner. If the learner already agreed to these times in their last message, call confirm_plan immediately with these same sessions. Otherwise, present the proposal and wait for their response.'
+        };
+      }
+      default:
+        return { error: `Unknown tool: ${name}` };
     }
-
-    if (result.confirmed) {
-      result.proposedPlan = {
-        weekly_goal: `Complete study for ${goal}`,
-        sessions,
-      };
-    }
-
-    return result;
   }
 }
 

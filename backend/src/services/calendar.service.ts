@@ -29,7 +29,7 @@ export class CalendarService {
 
     try {
       if (typeof globalThis.EventSource === 'undefined') {
-        const { default: EventSource } = await import('eventsource');
+        const { EventSource } = await import('eventsource');
         (globalThis as any).EventSource = EventSource;
       }
 
@@ -85,10 +85,10 @@ export class CalendarService {
   }
 
   public async createEvent(title: string, start: Date, durationMinutes: number): Promise<string> {
-    const id = crypto.randomUUID();
     const end = new Date(start.getTime() + durationMinutes * 60000);
     const sseUrl = process.env.MCP_CALENDAR_SERVER_URL;
 
+    let googleEventId: string | null = null;
     let synced = false;
 
     if (sseUrl) {
@@ -96,18 +96,23 @@ export class CalendarService {
       if (client) {
         const startMcp = process.hrtime();
         try {
-          await client.callTool({
+          const toolResult = await client.callTool({
             name: this.toolNames.create,
             arguments: {
-              title,
+              summary: title,  // Google Calendar API uses 'summary' not 'title'
               start: start.toISOString(),
               end: end.toISOString(),
             },
           });
+          // Extract Google Calendar event ID from MCP SDK response
+          try {
+            const text = (toolResult as any)?.content?.[0]?.text;
+            if (text) googleEventId = JSON.parse(text)?.event?.id ?? null;
+          } catch { /* ignore parse errors */ }
+
           const diff = process.hrtime(startMcp);
           const duration = (diff[0] * 1e9 + diff[1]) / 1e6;
           console.log(`[Telemetry] MCP Tool Call "${this.toolNames.create}" - Duration: ${duration.toFixed(2)}ms`);
-          
           TelemetryModel.create({
             event_type: 'mcp_tool_call',
             name: this.toolNames.create,
@@ -123,7 +128,7 @@ export class CalendarService {
         }
       }
 
-      // Fallback: Try Direct HTTP POST (for custom JSON-RPC servers like daemonX10/Google-Calendar-MCP-Server)
+      // Fallback: Try Direct HTTP POST (for custom JSON-RPC servers like this project's MCP server)
       if (!synced) {
         try {
           const res = await fetch(sseUrl, {
@@ -139,6 +144,8 @@ export class CalendarService {
             }),
           });
           if (res.ok) {
+            const data = await res.json();
+            googleEventId = data?.value?.event?.id ?? null;
             console.log(`[MCP Calendar] Successfully synced to external calendar via direct HTTP POST`);
             synced = true;
           }
@@ -148,9 +155,11 @@ export class CalendarService {
       }
     }
 
-    CalendarService.mockEvents.set(id, { id, title, start, end });
-    console.log(`[MCP Calendar] Created event ${id}: "${title}"`);
-    return id;
+    // Use Google's event ID when available so future deletes can target the right event
+    const eventId = googleEventId ?? crypto.randomUUID();
+    CalendarService.mockEvents.set(eventId, { id: eventId, title, start, end });
+    console.log(`[MCP Calendar] Created event ${eventId}: "${title}"${synced ? ' (synced to Google Calendar)' : ''}`);
+    return eventId;
   }
 
   public async deleteEvent(id: string): Promise<boolean> {
@@ -167,8 +176,7 @@ export class CalendarService {
           await client.callTool({
             name: this.toolNames.delete,
             arguments: {
-              id,
-              title: event.title,
+              eventId: id,  // Google Calendar MCP server expects 'eventId' not 'id'
             },
           });
           const diff = process.hrtime(startMcp);
@@ -218,6 +226,33 @@ export class CalendarService {
 
   public async getEvents(): Promise<CalendarEvent[]> {
     return Array.from(CalendarService.mockEvents.values());
+  }
+
+  public async getFreeBusy(weekStart?: Date): Promise<Array<{ start: string; end: string; available: boolean }>> {
+    const base = weekStart ?? new Date();
+    const slots: Array<{ start: string; end: string; available: boolean }> = [];
+    const existing = Array.from(CalendarService.mockEvents.values());
+
+    for (let day = 0; day < 7; day++) {
+      for (let halfHour = 0; halfHour < 48; halfHour++) {
+        const slotStart = new Date(base);
+        slotStart.setDate(base.getDate() + day);
+        slotStart.setHours(Math.floor(halfHour / 2), (halfHour % 2) * 30, 0, 0);
+        const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
+
+        const busy = existing.some(e => e.start < slotEnd && e.end > slotStart);
+        slots.push({ start: slotStart.toISOString(), end: slotEnd.toISOString(), available: !busy });
+      }
+    }
+    return slots;
+  }
+
+  public async listUpcoming(limit = 10): Promise<CalendarEvent[]> {
+    const now = new Date();
+    return Array.from(CalendarService.mockEvents.values())
+      .filter(e => e.start >= now)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .slice(0, limit);
   }
 
   public static clear(): void {

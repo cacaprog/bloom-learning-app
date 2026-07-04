@@ -3,6 +3,24 @@ import { OpenAI } from 'openai';
 import { promptService } from './prompt.service.js';
 import { TelemetryModel } from '../models/telemetry.js';
 
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
+
+export type LlmResponse =
+  | { type: 'text'; content: string }
+  | { type: 'tool_call'; id: string; name: string; args: Record<string, unknown> };
+
+export interface ToolMessage {
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCall?: { id: string; name: string; args: Record<string, unknown> };
+  toolCallId?: string;
+  toolName?: string;
+}
+
 export class LlmService {
   public getProvider(): 'gemini' | 'openai' | 'ollama' | 'mock' {
     if (process.env.OLLAMA_MODEL) {
@@ -139,6 +157,188 @@ export class LlmService {
     }
   }
 
+  public async generateWithTools(
+    systemPrompt: string,
+    messages: ToolMessage[],
+    tools: ToolDefinition[]
+  ): Promise<LlmResponse> {
+    const provider = this.getProvider();
+    const startTime = process.hrtime();
+    let result: LlmResponse = { type: 'text', content: '' };
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    try {
+      if (provider === 'openai' || provider === 'ollama') {
+        try {
+          const openai = provider === 'openai'
+            ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
+            : new OpenAI({ apiKey: 'ollama', baseURL: process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1' });
+
+          const model = provider === 'openai' ? 'gpt-4o-mini' : (process.env.OLLAMA_MODEL || 'qwen3.5:latest');
+
+          const openaiMessages: any[] = [{ role: 'system', content: systemPrompt }];
+          for (const m of messages) {
+            if (m.role === 'assistant' && m.toolCall) {
+              openaiMessages.push({
+                role: 'assistant',
+                content: null,
+                tool_calls: [{
+                  id: m.toolCall.id,
+                  type: 'function',
+                  function: { name: m.toolCall.name, arguments: JSON.stringify(m.toolCall.args) }
+                }]
+              });
+            } else if (m.role === 'tool') {
+              openaiMessages.push({ role: 'tool', content: m.content, tool_call_id: m.toolCallId });
+            } else {
+              openaiMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content });
+            }
+          }
+
+          const completion = await openai.chat.completions.create({
+            model,
+            messages: openaiMessages,
+            tools: tools.map(t => ({ type: 'function' as const, function: { name: t.name, description: t.description, parameters: t.parameters } })),
+            tool_choice: 'auto'
+          });
+
+          const usage = completion.usage;
+          if (usage) {
+            inputTokens = usage.prompt_tokens || 0;
+            outputTokens = usage.completion_tokens || 0;
+          }
+
+          const choice = completion.choices[0];
+          if (choice?.message?.tool_calls?.length) {
+            const tc = choice.message.tool_calls[0] as any;
+            result = { type: 'tool_call', id: tc.id, name: tc.function.name, args: JSON.parse(tc.function.arguments || '{}') };
+          } else {
+            result = { type: 'text', content: (choice?.message?.content || '').trim() };
+          }
+        } catch (err) {
+          console.error(`${provider} generateWithTools failed, falling back to mock:`, err);
+          result = this.getMockToolResponse(systemPrompt, messages, tools);
+        }
+      } else if (provider === 'gemini') {
+        try {
+          const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+          const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: systemPrompt,
+            tools: [{ functionDeclarations: tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters as any })) }]
+          });
+
+          const contents: any[] = messages.map(m => {
+            if (m.role === 'assistant' && m.toolCall) {
+              return { role: 'model', parts: [{ functionCall: { name: m.toolCall.name, args: m.toolCall.args } }] };
+            }
+            if (m.role === 'tool') {
+              return { role: 'user', parts: [{ functionResponse: { name: m.toolName, response: { output: m.content } } }] };
+            }
+            return { role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] };
+          });
+
+          const geminiResult = await model.generateContent({ contents });
+          const functionCalls = geminiResult.response.functionCalls();
+
+          const usage = geminiResult.response.usageMetadata;
+          if (usage) {
+            inputTokens = usage.promptTokenCount || 0;
+            outputTokens = usage.candidatesTokenCount || 0;
+          }
+
+          if (functionCalls?.length) {
+            const fc = functionCalls[0];
+            result = { type: 'tool_call', id: fc.name, name: fc.name, args: fc.args as Record<string, unknown> };
+          } else {
+            result = { type: 'text', content: geminiResult.response.text().trim() };
+          }
+        } catch (err) {
+          console.error('Gemini generateWithTools failed, falling back to mock:', err);
+          result = this.getMockToolResponse(systemPrompt, messages, tools);
+        }
+      } else {
+        result = this.getMockToolResponse(systemPrompt, messages, tools);
+      }
+
+      return result;
+    } finally {
+      const diff = process.hrtime(startTime);
+      const durationInMs = (diff[0] * 1e9 + diff[1]) / 1e6;
+      const toolName = result.type === 'tool_call' ? result.name : 'text';
+      console.log(`[Telemetry] LLM Tool Call - Tool: ${toolName} - Provider: ${provider} - Duration: ${durationInMs.toFixed(2)}ms - Tokens: ${inputTokens} in / ${outputTokens} out`);
+
+      TelemetryModel.create({
+        event_type: 'llm_generation',
+        name: `tool:${toolName}`,
+        provider,
+        duration_ms: Number(durationInMs.toFixed(2)),
+        status: 'success',
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+      }).catch(err => console.error('[Telemetry] Failed to save tool call log:', err));
+    }
+  }
+
+  private getMockToolResponse(systemPrompt: string, messages: ToolMessage[], tools: ToolDefinition[]): LlmResponse {
+    const toolNames = tools.map(t => t.name);
+    const hasDelegate = toolNames.includes('delegate');
+    const hasConfirmPlan = toolNames.includes('confirm_plan');
+    const toolResults = messages.filter(m => m.role === 'tool');
+    const userMessages = messages.filter(m => m.role === 'user');
+    const lastUserContent = userMessages[userMessages.length - 1]?.content?.toLowerCase() || '';
+
+    if (hasConfirmPlan) {
+      // Planning ReAct loop mode
+      const isConfirming = lastUserContent.includes('confirm') || lastUserContent.includes('yes') || lastUserContent.includes('agree') || lastUserContent.includes('/confirm-plan');
+      if (toolResults.length === 0) {
+        if (isConfirming) {
+          return { type: 'tool_call', id: 'mock-plan-1', name: 'get_free_busy', args: {} };
+        }
+        return { type: 'text', content: "Here's a starting point — a few sessions spread through the week. Does that rhythm feel right, or would you prefer to adjust?" };
+      }
+      // After get_free_busy: call confirm_plan
+      const base = new Date();
+      const sessions = Array.from({ length: 3 }, (_, i) => {
+        const d = new Date(base);
+        d.setDate(d.getDate() + (i + 1) * 2);
+        d.setHours(19, 0, 0, 0);
+        return { title: `Study session ${i + 1}`, scheduled_at: d.toISOString(), duration_minutes: 60 };
+      });
+      return { type: 'tool_call', id: 'mock-plan-2', name: 'confirm_plan', args: { weekly_goal: 'Complete weekly study sessions', sessions } };
+    }
+
+    if (hasDelegate) {
+      // Coordinator routing mode — extract the actual current state from the prompt
+      const stateMatch = systemPrompt.match(/Current conversation state:\s*\*{0,2}(\w+)\*{0,2}/i);
+      const currentState = stateMatch ? stateMatch[1].toUpperCase() : 'PLANNING';
+
+      if (toolResults.length === 0) {
+        let agent = 'planning';
+        if (currentState.startsWith('ONBOARDING') || currentState === 'NEW_USER') agent = 'onboarding';
+        else if (currentState.startsWith('RECOVERY')) agent = 'recovery';
+        else if (currentState === 'REFLECTION') agent = 'reflection';
+        return { type: 'tool_call', id: 'mock-coord-1', name: 'delegate', args: { agent, reason: `Routing to ${agent} specialist` } };
+      }
+      // After delegation: respond with specialist result
+      const lastTool = toolResults[toolResults.length - 1];
+      let specialistResponse = lastTool.content;
+      let suggestedState = 'PLANNING';
+      try {
+        const parsed = JSON.parse(lastTool.content);
+        specialistResponse = parsed.response || lastTool.content;
+        suggestedState = parsed.suggested_state || 'PLANNING';
+      } catch {
+        // content was not JSON
+      }
+      return { type: 'tool_call', id: 'mock-coord-2', name: 'respond', args: { message: specialistResponse, new_state: suggestedState } };
+    }
+
+    return { type: 'text', content: "I'm here to help. What would you like to do?" };
+  }
+
   private getMockResponse(agentKey: string, userMessage: string): string {
     const text = userMessage.toLowerCase();
     switch (agentKey) {
@@ -164,9 +364,9 @@ export class LlmService {
       }
       case 'planning':
         if (text.includes('confirm') || text.includes('yes') || text.includes('agree')) {
-          return "Excellent! I have confirmed your weekly plan with 3 sessions. I've synced this to your calendar. Ready to go!";
+          return "Great — locking that in. Sessions scheduled and added to your calendar.";
         }
-        return "I've drafted a learning plan based on your onboarding profile. It includes 3 focus sessions scheduled throughout the week during your preferred times. Would you like to confirm this plan or make changes?";
+        return "Here's a starting point for your weekly sessions. Does that rhythm feel right, or would you prefer to adjust?";
       case 'recovery':
         if (text.includes('yes') || text.includes('sure') || text.includes('please')) {
           return 'Great! Rescheduled the session for tomorrow at the same time. Showing up after a miss is what consistency actually looks like.';

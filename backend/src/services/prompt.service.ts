@@ -18,7 +18,7 @@ export class PromptService {
   }
 
   private loadAll() {
-    const keys = ['onboarding', 'planning', 'recovery', 'reflection'];
+    const keys = ['onboarding', 'planning', 'recovery', 'reflection', 'coordinator'];
     for (const key of keys) {
       const filePath = path.join(this.promptsDir, `${key}.md`);
       try {
@@ -74,6 +74,8 @@ export class PromptService {
         return 'I noticed you missed your session. No judgment—life happens. What got in the way?';
       case 'reflection':
         return 'What went well in this session?';
+      case 'coordinator':
+        return 'You are the coordinator. Route to the appropriate specialist based on the current conversation state. Current conversation state: {current_state}';
       default:
         return 'Coaching system instruction.';
     }

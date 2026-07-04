@@ -11,6 +11,8 @@ const tables: Record<string, any[]> = {
   a2a_tasks: [],
   reflection_entries: [],
   telemetry_events: [],
+  learner_memories: [],
+  memory_summaries: [],
 };
 
 async function mockQuery(text: string, params?: any[]) {
@@ -197,6 +199,72 @@ async function mockQuery(text: string, params?: any[]) {
     const messages = tables.coach_messages.filter((m) => m.user_id === params![0]);
     messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     return { rows: messages };
+  }
+
+  if (queryText.includes('insert into learner_memories')) {
+    const memory = {
+      id: params![0],
+      user_id: params![1],
+      fact_type: params![2],
+      content: params![3],
+      confidence: params![4],
+      source_agent: params![5],
+      archived: false,
+      created_at: new Date(),
+    };
+    tables.learner_memories.push(memory);
+    return { rows: [memory] };
+  }
+
+  if (queryText.includes('select * from learner_memories')) {
+    const userId = params![0];
+    const since: Date = params![1] ? new Date(params![1]) : new Date(0);
+    const limit = params![2] ? Number(params![2]) : 1000;
+    let rows = tables.learner_memories.filter(
+      (m) => m.user_id === userId && new Date(m.created_at) >= since && !m.archived
+    );
+    const ascending = queryText.includes('order by created_at asc');
+    rows.sort((a, b) => ascending
+      ? new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      : new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+    return { rows: rows.slice(0, limit) };
+  }
+
+  if (queryText.includes('update learner_memories set archived')) {
+    const userId = params![0];
+    const cutoff = new Date(params![1]);
+    tables.learner_memories.forEach((m) => {
+      if (m.user_id === userId && new Date(m.created_at) < cutoff) m.archived = true;
+    });
+    return { rows: [] };
+  }
+
+  if (queryText.includes('select distinct user_id from learner_memories')) {
+    const userIds = [...new Set(tables.learner_memories.filter(m => !m.archived).map(m => m.user_id))];
+    return { rows: userIds.map(id => ({ user_id: id })) };
+  }
+
+  if (queryText.includes('insert into memory_summaries')) {
+    const summary = {
+      id: params![0],
+      user_id: params![1],
+      period_start: params![2],
+      period_end: params![3],
+      summary_text: params![4],
+      fact_count: params![5],
+      created_at: new Date(),
+    };
+    tables.memory_summaries.push(summary);
+    return { rows: [summary] };
+  }
+
+  if (queryText.includes('select * from memory_summaries')) {
+    const userId = params![0];
+    const rows = tables.memory_summaries
+      .filter((s) => s.user_id === userId)
+      .sort((a, b) => b.period_end.localeCompare(a.period_end));
+    return { rows: rows.slice(0, 1) };
   }
 
   if (queryText.includes('insert into telemetry_events')) {

@@ -10,13 +10,15 @@ export interface RecoveryResult {
 export class RecoveryAgent {
   public async processTurn(
     message: string,
-    currentStage: string
+    currentStage: string,
+    memoryContext = ''
   ): Promise<RecoveryResult> {
     const text = message.toLowerCase();
     const provider = llmService.getProvider();
 
     if (provider !== 'mock') {
-      const response = await llmService.generate('recovery', `Stage: ${currentStage}, Message: ${message}`);
+      const systemPrompt = promptService.getPrompt('recovery').replace(/{learner_context}/g, memoryContext);
+      const response = await llmService.generate(systemPrompt, `Stage: ${currentStage}, Message: ${message}`);
       let nextStage = 'EXPLORE';
       let rescheduleNeeded = false;
 

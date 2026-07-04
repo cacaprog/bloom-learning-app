@@ -32,27 +32,43 @@ export class OnboardingAgent {
       nextState = 'ONBOARDING_S2';
     } else if (currentState === 'ONBOARDING_S2') {
       nextState = 'ONBOARDING_S3';
-      const category = text.includes('tech') ? 'technical' : text.includes('lang') ? 'language' : 'professional';
-      slotsFilled = {
-        primary_goal: message,
-        goal_category: category,
-      };
+      // Detect category only when clearly signalled — no default fallback.
+      // The LLM will carry unlabelled goals fine without a forced category.
+      const category =
+        /\btech|cod(e|ing)|program|software|data\b/i.test(text) ? 'technical'
+        : /\blang|speak|french|spanish|english|portuguese|japanese|chinese|german\b/i.test(text) ? 'language'
+        : /\bcreat|art\b|music|design|writ|draw|paint|photo\b/i.test(text) ? 'creative'
+        : /\bfun\b|hobby|personal|passion|interest\b/i.test(text) ? 'personal'
+        : /\bprofession|career|work\b|business|job\b/i.test(text) ? 'professional'
+        : null;
+      slotsFilled = { primary_goal: message };
+      if (category) slotsFilled.goal_category = category;
     } else if (currentState === 'ONBOARDING_S3') {
       nextState = 'ONBOARDING_S4';
     } else if (currentState === 'ONBOARDING_S4') {
       nextState = 'ONBOARDING_S5';
-      const hoursMatch = text.match(/\b\d+\b/);
-      const hours = hoursMatch ? parseInt(hoursMatch[0]) : undefined;
-      const bestTime = text.includes('morning') ? 'morning' : text.includes('evening') ? 'evening' : text.includes('midday') ? 'midday' : undefined;
-      
+      // Require "hours"/"hrs" context so a standalone number like "5" isn't grabbed
+      const hoursPattern = text.match(/\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h\/week)\b/i)
+        || text.match(/\b(\d+)\s+(?:per\s+)?(?:week|weekly)\b/i);
+      const hours = hoursPattern ? parseFloat(hoursPattern[1]) : undefined;
+      const bestTime = text.includes('morning') ? 'morning'
+        : text.includes('evening') ? 'evening'
+        : text.includes('midday') ? 'midday'
+        : text.includes('afternoon') ? 'afternoon'
+        : text.includes('night') ? 'evening'
+        : undefined;
+
       slotsFilled = {};
       if (hours !== undefined) slotsFilled.weekly_time_budget_hours = hours;
       if (bestTime !== undefined) slotsFilled.best_time = bestTime;
     } else if (currentState === 'ONBOARDING_S5') {
       nextState = 'ONBOARDING_S6';
-      const confMatch = text.match(/\b\d+\b/);
-      const score = confMatch ? parseInt(confMatch[0]) : undefined;
-      
+      // Guard: if the message is about time, the user probably answered the wrong question.
+      // Don't capture it as confidence — leave undefined so the LLM will ask again.
+      const isTimeAnswer = /\b(?:hours?|hrs?|minutes?|per\s+week|weekly|\/week)\b/i.test(text);
+      const confMatch = !isTimeAnswer ? text.match(/\b([1-9]|10)\b/) : null;
+      const score = confMatch ? parseInt(confMatch[1]) : undefined;
+
       slotsFilled = {};
       if (score !== undefined) {
         slotsFilled.confidence_score = score;
@@ -67,9 +83,13 @@ export class OnboardingAgent {
     let response: string;
     if (provider !== 'mock') {
       const mergedSlots = { ...slots, ...slotsFilled };
+      // Strip null/undefined so the LLM doesn't see incomplete fields and over-infer
+      const knownSlots = Object.fromEntries(
+        Object.entries(mergedSlots).filter(([, v]) => v != null)
+      );
       let promptInput = `Current State: ${currentState}. User message: ${message}`;
-      if (Object.keys(mergedSlots).length > 0) {
-        promptInput += `\nProfile details gathered so far:\n${JSON.stringify(mergedSlots, null, 2)}`;
+      if (Object.keys(knownSlots).length > 0) {
+        promptInput += `\nProfile details gathered so far:\n${JSON.stringify(knownSlots, null, 2)}`;
       }
       response = await llmService.generate('onboarding', promptInput);
     } else {

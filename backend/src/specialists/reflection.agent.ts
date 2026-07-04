@@ -8,10 +8,11 @@ export interface ReflectionResult {
 }
 
 export class ReflectionAgent {
-  public async generatePrompt(triggerType: string): Promise<string> {
+  public async generatePrompt(triggerType: string, memoryContext = ''): Promise<string> {
     const provider = llmService.getProvider();
     if (provider !== 'mock') {
-      return await llmService.generate('reflection', `Trigger Type: ${triggerType}`);
+      const systemPrompt = promptService.getPrompt('reflection').replace(/{learner_context}/g, memoryContext);
+      return await llmService.generate(systemPrompt, `Trigger Type: ${triggerType}`);
     }
 
     switch (triggerType) {
