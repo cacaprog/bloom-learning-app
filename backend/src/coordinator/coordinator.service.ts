@@ -10,7 +10,7 @@ import { WeeklyPlanModel } from '../models/plan.js';
 import { LearningSessionModel } from '../models/session.js';
 import { ReflectionEntryModel } from '../models/reflection.js';
 import { calendarService } from '../services/calendar.service.js';
-import { llmService, ToolDefinition, ToolMessage } from '../services/llm.service.js';
+import { llmService, LlmResponse, ToolDefinition, ToolMessage } from '../services/llm.service.js';
 import { promptService } from '../services/prompt.service.js';
 import { memoryService } from '../services/memory.service.js';
 import crypto from 'crypto';
@@ -94,6 +94,25 @@ const COORDINATOR_TOOLS: ToolDefinition[] = [
   }
 ];
 
+// Transcribed from coordinator.md's routing table — the one specialist each state
+// unambiguously requires. ACTIVE_WEEK is deliberately absent: routing there is a
+// genuine judgment call (on-topic vs. aside), not a fixed mapping.
+const REQUIRED_AGENT_BY_STATE: Record<string, string> = {
+  NEW_USER: 'onboarding',
+  ONBOARDING_S1: 'onboarding',
+  ONBOARDING_S2: 'onboarding',
+  ONBOARDING_S3: 'onboarding',
+  ONBOARDING_S4: 'onboarding',
+  ONBOARDING_S5: 'onboarding',
+  ONBOARDING_S6: 'onboarding',
+  PLANNING: 'planning',
+  RECOVERY_INITIATE: 'recovery',
+  RECOVERY_EXPLORE: 'recovery',
+  RECOVERY_RESOLVE: 'recovery',
+  RECOVERY_COMPLETE: 'recovery',
+  REFLECTION: 'reflection',
+};
+
 export class CoordinatorService {
   private static onboardingSlots: Record<string, Partial<LearnerProfile>> = {};
   private static onboardingStateTurns: Record<string, number> = {};
@@ -125,13 +144,25 @@ export class CoordinatorService {
     ];
 
     for (let iteration = 0; iteration < 3; iteration++) {
-      let routing;
+      let routing: LlmResponse;
       try {
         routing = await llmService.generateWithTools(coordinatorPrompt, routingMessages, COORDINATOR_TOOLS);
       } catch (err) {
         console.error('[Coordinator] generateWithTools failed:', err);
         responseToUser = "I'm here to support your learning journey. What would you like to focus on?";
         break;
+      }
+
+      // Routing guard: for states with an unambiguous required specialist, don't trust the
+      // model's tool choice — correct it before any reply is generated. Only applies to the
+      // turn's first routing decision; a recovery→reflection cascade (iteration > 0) is a
+      // genuinely judgment-based second decision that this guard must not override.
+      if (iteration === 0) {
+        const requiredAgent = REQUIRED_AGENT_BY_STATE[currentState];
+        const alreadyCorrect = routing.type === 'tool_call' && routing.name === 'delegate' && routing.args.agent === requiredAgent;
+        if (requiredAgent && !alreadyCorrect) {
+          routing = { type: 'tool_call', id: `routing-guard-${iteration}`, name: 'delegate', args: { agent: requiredAgent, reason: 'Routing guard: state requires this specialist' } };
+        }
       }
 
       if (routing.type === 'text') {

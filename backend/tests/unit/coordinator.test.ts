@@ -3,6 +3,8 @@ import { llmService } from '../../src/services/llm.service.js';
 import { LearnerProfileModel } from '../../src/models/profile.js';
 import { planningAgent } from '../../src/specialists/planning.agent.js';
 import { onboardingAgent } from '../../src/specialists/onboarding.agent.js';
+import { recoveryAgent } from '../../src/specialists/recovery.agent.js';
+import { reflectionAgent } from '../../src/specialists/reflection.agent.js';
 
 jest.mock('../../src/services/llm.service.js', () => ({
   llmService: {
@@ -209,5 +211,102 @@ describe('CoordinatorService Unit Tests', () => {
       goal_category: 'general',
       preferred_formats: ['flexible'],
     }));
+  });
+
+  it('routes to the correct specialist even when the model chooses a different one for a mapped state (spec 004-coordinator-routing-guard)', async () => {
+    (onboardingAgent.executeTurn as jest.Mock).mockResolvedValue({
+      response: 'Great, your profile is confirmed.',
+      nextState: 'PLANNING',
+      slotsFilled: {},
+    });
+
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'delegate', args: { agent: 'planning', reason: 'Model mistakenly picked planning' } });
+
+    const result = await coordinator.processMessage('user-guard-1', 'yes confirm', {
+      userId: 'user-guard-1',
+      currentState: 'ONBOARDING_S6',
+      lastMessages: []
+    });
+
+    expect(onboardingAgent.executeTurn).toHaveBeenCalledTimes(1);
+    expect(planningAgent.processTurn).not.toHaveBeenCalled();
+    expect(result.responseToUser).toBe('Great, your profile is confirmed.');
+    expect(result.newState).toBe('PLANNING');
+  });
+
+  it('routes to the correct specialist when the model bypasses delegation entirely for a mapped state (spec 004-coordinator-routing-guard)', async () => {
+    (onboardingAgent.executeTurn as jest.Mock).mockResolvedValue({
+      response: 'Great, your profile is confirmed.',
+      nextState: 'PLANNING',
+      slotsFilled: {},
+    });
+
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'text', content: 'Sounds good!' });
+
+    const result = await coordinator.processMessage('user-guard-2', 'yes confirm', {
+      userId: 'user-guard-2',
+      currentState: 'ONBOARDING_S6',
+      lastMessages: []
+    });
+
+    expect(onboardingAgent.executeTurn).toHaveBeenCalledTimes(1);
+    expect(result.responseToUser).toBe('Great, your profile is confirmed.');
+    expect(result.newState).toBe('PLANNING');
+  });
+
+  it('does not override ACTIVE_WEEK routing when delegating to reflection for an on-topic message (spec 004-coordinator-routing-guard)', async () => {
+    (reflectionAgent.generatePrompt as jest.Mock).mockResolvedValue('Reflection prompt');
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'delegate', args: { agent: 'reflection', reason: 'Session finished' } });
+
+    const result = await coordinator.processMessage('user-active-1', 'I finished my session', {
+      userId: 'user-active-1',
+      currentState: 'ACTIVE_WEEK',
+      lastMessages: []
+    });
+
+    expect(result.responseToUser).toBe('Reflection prompt');
+    expect(result.newState).toBe('REFLECTION');
+  });
+
+  it('does not override ACTIVE_WEEK routing when responding directly to an off-topic message (spec 004-coordinator-routing-guard)', async () => {
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'respond', args: { message: "Let's stay focused on your learning goal!", new_state: 'ACTIVE_WEEK' } });
+
+    const result = await coordinator.processMessage('user-active-2', 'what is the weather today?', {
+      userId: 'user-active-2',
+      currentState: 'ACTIVE_WEEK',
+      lastMessages: []
+    });
+
+    expect(result.responseToUser).toBe("Let's stay focused on your learning goal!");
+    expect(result.newState).toBe('ACTIVE_WEEK');
+    expect(planningAgent.processTurn).not.toHaveBeenCalled();
+    expect(onboardingAgent.executeTurn).not.toHaveBeenCalled();
+  });
+
+  it('does not override the cascade delegation from recovery to reflection on the second iteration (spec 004-coordinator-routing-guard)', async () => {
+    (recoveryAgent.processTurn as jest.Mock).mockResolvedValue({
+      response: 'Recovery response',
+      nextStage: 'ACTIVE_WEEK',
+      rescheduleNeeded: false,
+    });
+    (reflectionAgent.generatePrompt as jest.Mock).mockResolvedValue('Reflection prompt');
+    (reflectionAgent.processResponse as jest.Mock).mockResolvedValue({ text: 'Great session', skipped: false });
+
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'delegate', args: { agent: 'recovery', reason: 'Recovery state' } })
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c2', name: 'delegate', args: { agent: 'reflection', reason: 'Cascade to reflection' } });
+
+    const result = await coordinator.processMessage('user-cascade-1', 'I missed my session', {
+      userId: 'user-cascade-1',
+      currentState: 'RECOVERY_INITIATE',
+      lastMessages: []
+    });
+
+    expect(reflectionAgent.processResponse).toHaveBeenCalled();
+    expect(result.newState).toBe('ACTIVE_WEEK');
   });
 });
