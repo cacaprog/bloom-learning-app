@@ -328,7 +328,7 @@ body {
   animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.reflection-prompt-card, .recovery-modal, .profile-summary-container {
+.reflection-prompt-card, .recovery-modal, .profile-summary-container, .calendar-sync-modal {
   background: #0f1225;
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -341,14 +341,34 @@ body {
   box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.8);
 }
 
-.reflection-prompt-card h3, .recovery-modal h3, .profile-summary-container h2 {
+.reflection-prompt-card h3, .recovery-modal h3, .profile-summary-container h2, .calendar-sync-modal h3 {
   font-size: 20px;
   font-weight: 800;
   color: var(--text-primary);
 }
 
-.reflection-prompt-card p, .recovery-modal p, .profile-summary-container p {
+.reflection-prompt-card p, .recovery-modal p, .profile-summary-container p, .calendar-sync-modal p {
   font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.calendar-sync-warning {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.calendar-sync-warning p {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.calendar-sync-warning ul {
+  list-style: disc;
+  padding-left: 20px;
+  font-size: 14px;
   color: var(--text-secondary);
   line-height: 1.6;
 }

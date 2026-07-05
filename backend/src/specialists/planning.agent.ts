@@ -1,6 +1,8 @@
 import { promptService } from '../services/prompt.service.js';
 import { llmService, ToolDefinition, ToolMessage } from '../services/llm.service.js';
 import { calendarService } from '../services/calendar.service.js';
+import { DateContext } from '../utils/date.js';
+import { resolvePreferenceContext } from '../utils/preferences.js';
 
 export interface PlanningResult {
   response: string;
@@ -13,6 +15,7 @@ export interface PlanningResult {
       format: string;
       effort_level: string;
       calendar_event_id: string;
+      synced: boolean;
     }[];
   };
   confirmed: boolean;
@@ -99,16 +102,22 @@ export class PlanningAgent {
     message: string,
     profile: any,
     planningHistory: any[],
-    memoryContext = ''
+    memoryContext = '',
+    dateContext: DateContext
   ): Promise<PlanningResult> {
     const goal = profile?.primary_goal || 'your learning goal';
-    const budget = profile?.weekly_time_budget_hours || 5;
-    const bestTime = profile?.best_time || 'evening';
+    const preferences = resolvePreferenceContext(profile, planningHistory);
+
+    const budgetText = preferences.weeklyTimeBudgetHours != null
+      ? `${preferences.weeklyTimeBudgetHours} hours`
+      : 'not yet set — ask the learner what weekly time budget feels realistic before proposing a plan';
+    const bestTimeText = preferences.bestTime ?? 'not yet set — ask the learner when they focus best before proposing a plan';
 
     const systemPrompt = promptService.getPrompt('planning')
       .replace(/{primary_goal}/g, goal)
-      .replace(/{weekly_time_budget_hours}/g, String(budget))
-      .replace(/{best_time}/g, bestTime)
+      .replace(/{today}/g, `${dateContext.weekdayName}, ${dateContext.isoDate}`)
+      .replace(/{weekly_time_budget_hours}/g, budgetText)
+      .replace(/{best_time}/g, bestTimeText)
       .replace(/{learner_context}/g, memoryContext);
 
     const messages: ToolMessage[] = [
@@ -133,14 +142,15 @@ export class PlanningAgent {
         const sessionsWithIds = await Promise.all(
           rawSessions.map(async s => {
             const scheduledAt = new Date(s.scheduled_at);
-            const eventId = await calendarService.createEvent(s.title, scheduledAt, s.duration_minutes);
+            const { eventId, synced } = await calendarService.createEvent(s.title, scheduledAt, s.duration_minutes);
             return {
               topic: s.title,
               duration_minutes: s.duration_minutes,
               scheduled_at: scheduledAt,
               format: 'practice' as const,
               effort_level: 'moderate' as const,
-              calendar_event_id: eventId
+              calendar_event_id: eventId,
+              synced
             };
           })
         );

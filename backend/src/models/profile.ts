@@ -8,10 +8,10 @@ export interface LearnerProfile {
   motivation_reasons: string[];
   past_attempts: any[];
   barriers: any[];
-  weekly_time_budget_hours: number;
-  best_time: string;
+  weekly_time_budget_hours: number | null;
+  best_time: string | null;
   preferred_formats: string[];
-  confidence_score: number;
+  confidence_score: number | null;
   readiness_stage: string;
   success_definition: string;
   created_at?: Date;

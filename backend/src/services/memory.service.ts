@@ -32,9 +32,16 @@ export class MemoryService {
 
     if (!profile) return '';
 
-    const parts: string[] = [
-      `## Learner Context\n**Goal:** ${profile.primary_goal} (${profile.goal_category}) · ${profile.weekly_time_budget_hours}h/week · best time: ${profile.best_time} · confidence: ${profile.confidence_score}/10`
-    ];
+    const details = [
+      profile.weekly_time_budget_hours != null ? `${profile.weekly_time_budget_hours}h/week` : null,
+      profile.best_time != null ? `best time: ${profile.best_time}` : null,
+      profile.confidence_score != null ? `confidence: ${profile.confidence_score}/10` : null,
+    ].filter((d): d is string => d != null);
+
+    const goalLine = `**Goal:** ${profile.primary_goal} (${profile.goal_category})`
+      + (details.length > 0 ? ` · ${details.join(' · ')}` : '');
+
+    const parts: string[] = [`## Learner Context\n${goalLine}`];
 
     if (recentFacts.length > 0) {
       const lines = recentFacts.map(f => `- [${f.fact_type}] ${f.content}`).join('\n');

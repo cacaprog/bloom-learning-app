@@ -4,6 +4,8 @@ import { planningAgent } from '../specialists/planning.agent.js';
 import { recoveryAgent } from '../specialists/recovery.agent.js';
 import { reflectionAgent } from '../specialists/reflection.agent.js';
 import { LearnerProfileModel, LearnerProfile } from '../models/profile.js';
+import { UserModel } from '../models/user.js';
+import { resolveCurrentDateContext } from '../utils/date.js';
 import { WeeklyPlanModel } from '../models/plan.js';
 import { LearningSessionModel } from '../models/session.js';
 import { ReflectionEntryModel } from '../models/reflection.js';
@@ -24,6 +26,12 @@ export interface CoordinatorResponse {
   newState: string;
   agentDelegation: { agent: string; task: string } | null;
   safetyCheckPassed: boolean;
+  calendarSync?: {
+    weeklyGoal: string;
+    totalSessions: number;
+    syncedCount: number;
+    sessions: Array<{ topic: string; scheduledAt: string; synced: boolean }>;
+  };
 }
 
 interface SpecialistResult {
@@ -46,6 +54,7 @@ interface SpecialistResult {
         format: string;
         effort_level: string;
         calendar_event_id: string;
+        synced: boolean;
       }>;
     };
     rescheduleNeeded?: boolean;
@@ -87,6 +96,7 @@ const COORDINATOR_TOOLS: ToolDefinition[] = [
 
 export class CoordinatorService {
   private static onboardingSlots: Record<string, Partial<LearnerProfile>> = {};
+  private static onboardingStateTurns: Record<string, number> = {};
   private static recoveryStages: Record<string, string> = {};
   private static activePrompts: Record<string, string> = {};
 
@@ -99,6 +109,7 @@ export class CoordinatorService {
     let newState = currentState;
     let responseToUser = '';
     let lastAgentDelegation: { agent: string; task: string } | null = null;
+    let calendarSync: CoordinatorResponse['calendarSync'];
 
     // Build memory context once per turn — injected into each specialist
     const memoryContext = await memoryService.buildContext(userId).catch(() => '');
@@ -152,6 +163,20 @@ export class CoordinatorService {
         newState = specialistResult.suggestedNextState;
         responseToUser = specialistResult.response;
 
+        const proposedPlan = specialistResult.data?.proposedPlan;
+        if (specialistResult.data?.planConfirmed && proposedPlan) {
+          calendarSync = {
+            weeklyGoal: proposedPlan.weekly_goal,
+            totalSessions: proposedPlan.sessions.length,
+            syncedCount: proposedPlan.sessions.filter(s => s.synced).length,
+            sessions: proposedPlan.sessions.map(s => ({
+              topic: s.topic,
+              scheduledAt: s.scheduled_at.toISOString(),
+              synced: s.synced
+            }))
+          };
+        }
+
         // Fire-and-forget memory extraction (onboarding excluded — profile captured structurally)
         if (agentName !== 'onboarding') {
           const turnMessages = [
@@ -196,7 +221,8 @@ export class CoordinatorService {
       responseToUser,
       newState,
       agentDelegation: lastAgentDelegation,
-      safetyCheckPassed: safetyCheck.passed
+      safetyCheckPassed: safetyCheck.passed,
+      calendarSync
     };
   }
 
@@ -220,8 +246,11 @@ export class CoordinatorService {
         const result = await onboardingAgent.executeTurn(
           currentState,
           userMessage,
-          CoordinatorService.onboardingSlots[userId] || {}
+          CoordinatorService.onboardingSlots[userId] || {},
+          CoordinatorService.onboardingStateTurns[userId] || 0
         );
+        CoordinatorService.onboardingStateTurns[userId] =
+          result.nextState === currentState ? (CoordinatorService.onboardingStateTurns[userId] || 0) + 1 : 0;
         return {
           response: result.response,
           suggestedNextState: result.nextState,
@@ -234,8 +263,12 @@ export class CoordinatorService {
       }
 
       case 'planning': {
-        const profile = await LearnerProfileModel.findByUserId(userId);
-        const result = await planningAgent.processTurn(userMessage, profile, context.lastMessages || [], memoryContext);
+        const [profile, user] = await Promise.all([
+          LearnerProfileModel.findByUserId(userId),
+          UserModel.findById(userId)
+        ]);
+        const dateContext = resolveCurrentDateContext(user?.timezone || 'UTC');
+        const result = await planningAgent.processTurn(userMessage, profile, context.lastMessages || [], memoryContext, dateContext);
         return {
           response: result.response,
           suggestedNextState: result.confirmed ? 'ACTIVE_WEEK' : currentState,
@@ -329,15 +362,15 @@ export class CoordinatorService {
           id: crypto.randomUUID(),
           user_id: userId,
           primary_goal: (slots.primary_goal as string) || 'Learn a new skill',
-          goal_category: (slots.goal_category as string) || 'technical',
+          goal_category: (slots.goal_category as string) || 'general',
           motivation_reasons: (slots.motivation_reasons as string[]) || ['Career growth'],
           past_attempts: (slots.past_attempts as string[]) || [],
           barriers: (slots.barriers as string[]) || [],
-          weekly_time_budget_hours: (slots.weekly_time_budget_hours as number) || 5,
-          best_time: (slots.best_time as string) || 'evening',
-          preferred_formats: (slots.preferred_formats as string[]) || ['reading'],
-          confidence_score: (slots.confidence_score as number) || 7,
-          readiness_stage: (slots.readiness_stage as string) || 'action',
+          weekly_time_budget_hours: (slots.weekly_time_budget_hours as number) ?? null,
+          best_time: (slots.best_time as string) ?? null,
+          preferred_formats: (slots.preferred_formats as string[]) || ['flexible'],
+          confidence_score: (slots.confidence_score as number) ?? null,
+          readiness_stage: (slots.readiness_stage as string) || 'preparation',
           success_definition: (slots.success_definition as string) || 'Consistency'
         };
         await LearnerProfileModel.create(profile);
@@ -394,7 +427,7 @@ export class CoordinatorService {
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             tomorrow.setHours(19, 0, 0, 0);
-            const newEventId = await calendarService.createEvent(missed.topic, tomorrow, missed.duration_minutes);
+            const { eventId: newEventId } = await calendarService.createEvent(missed.topic, tomorrow, missed.duration_minutes);
             await LearningSessionModel.create({
               id: crypto.randomUUID(),
               plan_id: plan.id,

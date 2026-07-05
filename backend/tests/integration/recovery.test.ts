@@ -35,7 +35,7 @@ describe('Recovery Integration Flow', () => {
     const pastDate = new Date();
     pastDate.setHours(pastDate.getHours() - 3);
 
-    const eventId = await calendarService.createEvent('Test past topic', pastDate, 45);
+    const { eventId } = await calendarService.createEvent('Test past topic', pastDate, 45);
 
     await LearningSessionModel.create({
       id: sessionId,

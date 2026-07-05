@@ -111,6 +111,22 @@ describe('MemoryService Unit Tests', () => {
       expect(result).toContain('## Learner Context');
       expect(result).not.toContain('**Recent patterns:**');
     });
+
+    it('omits null profile fields instead of leaking the literal "null" (spec 003-onboarding-stage-completeness)', async () => {
+      (LearnerProfileModel.findByUserId as jest.Mock).mockResolvedValue({
+        primary_goal: 'Learn guitar',
+        goal_category: 'creative',
+        weekly_time_budget_hours: null,
+        best_time: null,
+        confidence_score: null,
+      });
+
+      const result = await service.buildContext('user-1');
+
+      expect(result).toContain('Learn guitar');
+      expect(result).toContain('creative');
+      expect(result).not.toContain('null');
+    });
   });
 
   describe('extractAndStore', () => {

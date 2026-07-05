@@ -84,7 +84,7 @@ export class CalendarService {
     }
   }
 
-  public async createEvent(title: string, start: Date, durationMinutes: number): Promise<string> {
+  public async createEvent(title: string, start: Date, durationMinutes: number): Promise<{ eventId: string; synced: boolean }> {
     const end = new Date(start.getTime() + durationMinutes * 60000);
     const sseUrl = process.env.MCP_CALENDAR_SERVER_URL;
 
@@ -159,7 +159,7 @@ export class CalendarService {
     const eventId = googleEventId ?? crypto.randomUUID();
     CalendarService.mockEvents.set(eventId, { id: eventId, title, start, end });
     console.log(`[MCP Calendar] Created event ${eventId}: "${title}"${synced ? ' (synced to Google Calendar)' : ''}`);
-    return eventId;
+    return { eventId, synced };
   }
 
   public async deleteEvent(id: string): Promise<boolean> {

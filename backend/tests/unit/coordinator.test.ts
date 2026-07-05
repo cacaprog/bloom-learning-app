@@ -2,6 +2,7 @@ import { CoordinatorService } from '../../src/coordinator/coordinator.service.js
 import { llmService } from '../../src/services/llm.service.js';
 import { LearnerProfileModel } from '../../src/models/profile.js';
 import { planningAgent } from '../../src/specialists/planning.agent.js';
+import { onboardingAgent } from '../../src/specialists/onboarding.agent.js';
 
 jest.mock('../../src/services/llm.service.js', () => ({
   llmService: {
@@ -12,7 +13,7 @@ jest.mock('../../src/services/llm.service.js', () => ({
 
 jest.mock('../../src/services/calendar.service.js', () => ({
   calendarService: {
-    createEvent: jest.fn().mockResolvedValue('evt-coord-123'),
+    createEvent: jest.fn().mockResolvedValue({ eventId: 'evt-coord-123', synced: true }),
     deleteEvent: jest.fn().mockResolvedValue(true),
     getFreeBusy: jest.fn().mockResolvedValue([]),
     listUpcoming: jest.fn().mockResolvedValue([]),
@@ -99,7 +100,7 @@ describe('CoordinatorService Unit Tests', () => {
 
   it('should transition to ACTIVE_WEEK when planning agent confirms plan', async () => {
     const futureSessions = [
-      { title: 'Session 1', scheduled_at: new Date('2026-07-10T19:00:00'), duration_minutes: 60, topic: 'Session 1', format: 'practice', effort_level: 'moderate', calendar_event_id: 'evt-1' },
+      { title: 'Session 1', scheduled_at: new Date('2026-07-10T19:00:00'), duration_minutes: 60, topic: 'Session 1', format: 'practice', effort_level: 'moderate', calendar_event_id: 'evt-1', synced: true },
     ];
 
     (planningAgent.processTurn as jest.Mock).mockResolvedValue({
@@ -119,6 +120,34 @@ describe('CoordinatorService Unit Tests', () => {
     });
 
     expect(result.newState).toBe('ACTIVE_WEEK');
+  });
+
+  it('carries a calendarSync summary with syncedCount below totalSessions when some sessions fail to sync (spec 002-calendar-sync-confirmation)', async () => {
+    const mixedSyncSessions = [
+      { title: 'Session 1', scheduled_at: new Date('2026-07-10T19:00:00'), duration_minutes: 60, topic: 'Session 1', format: 'practice', effort_level: 'moderate', calendar_event_id: 'evt-1', synced: true },
+      { title: 'Session 2', scheduled_at: new Date('2026-07-12T19:00:00'), duration_minutes: 60, topic: 'Session 2', format: 'practice', effort_level: 'moderate', calendar_event_id: 'evt-2', synced: false },
+    ];
+
+    (planningAgent.processTurn as jest.Mock).mockResolvedValue({
+      response: 'Plan confirmed!',
+      confirmed: true,
+      proposedPlan: { weekly_goal: 'Weekly test goal', sessions: mixedSyncSessions }
+    });
+
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'delegate', args: { agent: 'planning', reason: 'Planning' } })
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c2', name: 'respond', args: { message: 'Plan confirmed!', new_state: 'ACTIVE_WEEK' } });
+
+    const result = await coordinator.processMessage('user-mixed', 'yes confirm', {
+      userId: 'user-mixed',
+      currentState: 'PLANNING',
+      lastMessages: []
+    });
+
+    expect(result.calendarSync).toBeDefined();
+    expect(result.calendarSync!.totalSessions).toBe(2);
+    expect(result.calendarSync!.syncedCount).toBe(1);
+    expect(result.calendarSync!.syncedCount).toBeLessThan(result.calendarSync!.totalSessions);
   });
 
   it('should respond directly without delegation when coordinator LLM calls respond tool', async () => {
@@ -153,5 +182,32 @@ describe('CoordinatorService Unit Tests', () => {
 
     expect(result.safetyCheckPassed).toBe(false);
     expect(result.responseToUser).toContain('sustainable rhythm');
+  });
+
+  it('does not fabricate profile fields the learner never provided when onboarding completes (spec 003-onboarding-stage-completeness)', async () => {
+    (onboardingAgent.executeTurn as jest.Mock).mockResolvedValue({
+      response: 'Your learner profile is confirmed.',
+      nextState: 'PLANNING',
+      slotsFilled: {},
+    });
+
+    (llmService.generateWithTools as jest.Mock)
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c1', name: 'delegate', args: { agent: 'onboarding', reason: 'Onboarding' } })
+      .mockResolvedValueOnce({ type: 'tool_call', id: 'c2', name: 'respond', args: { message: 'Your learner profile is confirmed.', new_state: 'PLANNING' } });
+
+    await coordinator.processMessage('user-nofab', 'yes, confirm', {
+      userId: 'user-nofab',
+      currentState: 'ONBOARDING_S6',
+      lastMessages: []
+    });
+
+    expect(LearnerProfileModel.create).toHaveBeenCalledWith(expect.objectContaining({
+      weekly_time_budget_hours: null,
+      best_time: null,
+      confidence_score: null,
+      readiness_stage: 'preparation',
+      goal_category: 'general',
+      preferred_formats: ['flexible'],
+    }));
   });
 });

@@ -4,12 +4,21 @@ import { ProfileSummary } from './components/ProfileSummary';
 import { WeeklyPlanner } from './components/WeeklyPlanner';
 import { ReflectionPrompt } from './components/ReflectionPrompt';
 import { RecoveryModal } from './components/RecoveryModal';
+import { CalendarSyncConfirmation } from './components/CalendarSyncConfirmation';
+
+interface CalendarSyncData {
+  weeklyGoal: string;
+  totalSessions: number;
+  syncedCount: number;
+  sessions: { topic: string; scheduledAt: string; synced: boolean }[];
+}
 
 function App() {
   const [userId, setUserId] = useState<string>('');
   const [view, setView] = useState<'onboarding' | 'summary' | 'planner'>('onboarding');
   const [showReflection, setShowReflection] = useState(false);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [calendarSync, setCalendarSync] = useState<CalendarSyncData | null>(null);
   const [reflectionPromptText] = useState('What went well in this session? What made starting feel easy?');
 
   const [chatMessages, setChatMessages] = useState<any[]>(() => [
@@ -25,13 +34,43 @@ function App() {
     }
   };
 
-  const handleConfirmProfile = () => {
-    setChatState('PLANNING');
-    setChatMessages((prev) => [
-      ...prev,
-      { sender: 'coach', text: "I've drafted a learning plan based on your onboarding profile. It includes 3 focus sessions scheduled throughout the week during your preferred times. Would you like to confirm this plan or make changes?" }
-    ]);
+  const sendChatTurn = async (message: string) => {
+    setChatMessages((prev) => [...prev, { sender: 'user', text: message }]);
+
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, message, state: chatState }),
+      });
+      const data = await response.json();
+
+      if (data.userId) {
+        setUserId(data.userId);
+      }
+
+      const wasOnboarding = chatState.startsWith('ONBOARDING_');
+      const priorState = chatState;
+
+      setChatMessages((prev) => [...prev, { sender: 'coach', text: data.response }]);
+      setChatState(data.state);
+
+      if (data.calendarSync) {
+        setCalendarSync(data.calendarSync);
+      }
+
+      if ((wasOnboarding && data.state === 'PLANNING') || (priorState === 'PLANNING' && data.state === 'ACTIVE_WEEK')) {
+        handleOnboardingComplete(data.state);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setChatMessages((prev) => [...prev, { sender: 'coach', text: "Sorry, I encountered an issue. Let's try that again." }]);
+    }
+  };
+
+  const handleConfirmProfile = async () => {
     setView('onboarding');
+    await sendChatTurn('Yes, I confirm my profile.');
   };
 
   const handleBackToChat = () => {
@@ -113,6 +152,7 @@ function App() {
     setView('onboarding');
     setShowRecovery(false);
     setShowReflection(false);
+    setCalendarSync(null);
   };
 
   return (
@@ -166,6 +206,18 @@ function App() {
           </div>
         )}
 
+        {calendarSync && (
+          <div className="modal-overlay">
+            <CalendarSyncConfirmation
+              weeklyGoal={calendarSync.weeklyGoal}
+              totalSessions={calendarSync.totalSessions}
+              syncedCount={calendarSync.syncedCount}
+              sessions={calendarSync.sessions}
+              onContinue={() => setCalendarSync(null)}
+            />
+          </div>
+        )}
+
         {view === 'onboarding' && (
           <div className="chat-view">
             <div className="view-header">
@@ -173,13 +225,8 @@ function App() {
               <p>Onboard and plan your learning goals with your AI companion.</p>
             </div>
             <OnboardingChat
-              userId={userId}
-              setUserId={setUserId}
               messages={chatMessages}
-              setMessages={setChatMessages}
-              state={chatState}
-              setState={setChatState}
-              onOnboardingComplete={handleOnboardingComplete}
+              onSendMessage={sendChatTurn}
             />
           </div>
         )}

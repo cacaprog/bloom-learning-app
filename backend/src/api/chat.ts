@@ -72,6 +72,7 @@ router.post('/api/chat', async (req: Request, res: Response, next: NextFunction)
       response: coordinatorResponse.responseToUser,
       state: coordinatorResponse.newState,
       safetyCheckPassed: coordinatorResponse.safetyCheckPassed,
+      calendarSync: coordinatorResponse.calendarSync,
     });
   } catch (error) {
     next(error);

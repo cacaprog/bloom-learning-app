@@ -6,27 +6,14 @@ interface Message {
 }
 
 interface OnboardingChatProps {
-  userId: string;
-  setUserId: (id: string) => void;
   messages: Message[];
-  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
-  state: string;
-  setState: React.Dispatch<React.SetStateAction<string>>;
-  onOnboardingComplete: (nextState?: string) => void;
+  onSendMessage: (message: string) => Promise<void>;
 }
 
-export const OnboardingChat: React.FC<OnboardingChatProps> = ({
-  userId,
-  setUserId,
-  messages,
-  setMessages,
-  state,
-  setState,
-  onOnboardingComplete,
-}) => {
+export const OnboardingChat: React.FC<OnboardingChatProps> = ({ messages, onSendMessage }) => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -43,32 +30,9 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({
 
     const userMsg = input;
     setInput('');
-    setMessages((prev) => [...prev, { sender: 'user', text: userMsg }]);
     setLoading(true);
-
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, message: userMsg, state }),
-      });
-      const data = await response.json();
-
-      if (data.userId) {
-        setUserId(data.userId);
-      }
-
-      const wasOnboarding = state.startsWith('ONBOARDING_');
-
-      setMessages((prev) => [...prev, { sender: 'coach', text: data.response }]);
-      setState(data.state);
-
-      if ((wasOnboarding && data.state === 'PLANNING') || (state === 'PLANNING' && data.state === 'ACTIVE_WEEK')) {
-        onOnboardingComplete(data.state);
-      }
-    } catch (error) {
-      console.error('Error sending message:', error);
-      setMessages((prev) => [...prev, { sender: 'coach', text: "Sorry, I encountered an issue. Let's try that again." }]);
+      await onSendMessage(userMsg);
     } finally {
       setLoading(false);
     }

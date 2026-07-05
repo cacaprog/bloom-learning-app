@@ -58,8 +58,9 @@ describe('MCP Calendar Client Integration Tests', () => {
   it('should fall back to mock when MCP_CALENDAR_SERVER_URL is not set', async () => {
     delete process.env.MCP_CALENDAR_SERVER_URL;
 
-    const eventId = await calendarService.createEvent('Test Session', new Date(), 60);
+    const { eventId, synced } = await calendarService.createEvent('Test Session', new Date(), 60);
     expect(eventId).toBeDefined();
+    expect(synced).toBe(false);
 
     const events = await calendarService.getEvents();
     expect(events.length).toBe(1);
@@ -69,8 +70,9 @@ describe('MCP Calendar Client Integration Tests', () => {
   it('should connect to MCP server and call dynamic tool name when URL is set', async () => {
     process.env.MCP_CALENDAR_SERVER_URL = 'http://localhost:8000/sse';
 
-    const eventId = await calendarService.createEvent('MCP Course', new Date(), 45);
+    const { eventId, synced } = await calendarService.createEvent('MCP Course', new Date(), 45);
     expect(eventId).toBeDefined();
+    expect(synced).toBe(true);
 
     // Verify MCP tool creation name mapping resolved correctly
     expect(calendarService.toolNames.create).toBe('create_event');
