@@ -46,11 +46,12 @@ graph TD
 
 2. **Coordinator Service (The Gatekeeper)**
    * The central entry point for all user-facing interactions.
-   * Manages dialogue states, runs input/output **Safety Filters** (guilt, shaming, and productivity extremism block patterns), and delegates to specialists (max 1 delegation per turn).
+   * Manages dialogue states, runs input/output **Safety Filters** (guilt, shaming, and productivity extremism block patterns), and delegates to specialists (max 1 delegation per turn, plus a bounded recovery→reflection cascade).
+   * A deterministic **routing guard** double-checks the LLM's specialist choice against the current conversation state for every state with one unambiguous required specialist, correcting silent mis-delegation before any reply is generated.
 
 3. **Specialist Agents (Stateless Prompts)**
-   * **Onboarding Specialist**: Guides learners through states S1-S6 to map goals, availability, and focus windows.
-   * **Planning Specialist**: Co-creates weekly study schedules within ±10% of the user's weekly time budget, offering two distinct options.
+   * **Onboarding Specialist**: Guides learners through states S1-S6 to map goals, availability, and focus windows. Each state only advances once its required information is genuinely captured (or an existing 3-turn cap is reached) — never after exactly one message regardless of the answer. Fields the learner never actually provided (e.g., weekly time budget, focus time) are stored as unset, not backfilled with a fabricated default.
+   * **Planning Specialist**: Co-creates weekly study schedules within ±10% of the user's weekly time budget, grounding "today"/relative day references in the learner's real timezone. Asks for missing scheduling preferences instead of assuming a default. Surfaces a real calendar-sync confirmation (session count, and which sessions synced) after plan confirmation.
    * **Recovery Specialist**: Triggers 2 hours after a missed session to explore schedule blockers and reschedule.
    * **Reflection Specialist**: Initiates reflective dialogue post-session to build positive feedback loops.
 

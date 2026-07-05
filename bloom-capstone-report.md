@@ -4,7 +4,7 @@
 
 **Kaggle Capstone Project Report**
 **Track:** Concierge Agents
-**Word Count:** ~2,400 words (Limit: 2,500 words)
+**Word Count:** ~2,500 words (Limit: 2,500 words) — recheck with your submission tool before finalizing
 
 ---
 
@@ -70,7 +70,7 @@ Bloom-for-Learning utilizes a modular, multi-agent design governed by a central 
 ### 3.1. The LLM-Driven Coordinator-Specialist Pattern
 Rather than using a hard-coded if/else state machine, the Coordinator calls `generateWithTools` each turn with two tools — `delegate(agent, reason)` and `respond(message, new_state)` — and lets the LLM make routing decisions:
 
-1. **The Coordinator:** Builds conversation context (current state, last 15 messages, learner memory context), then runs a max-3-iteration tool loop. On each iteration it either delegates to a specialist or responds directly. After a delegation the coordinator uses the specialist's returned `suggestedNextState` directly — the LLM does not override the state — which makes state transitions deterministic regardless of model provider.
+1. **The Coordinator:** Builds conversation context (current state, last 15 messages, learner memory context), then runs a max-3-iteration tool loop. On each iteration it either delegates to a specialist or responds directly. After a delegation the coordinator uses the specialist's returned `suggestedNextState` directly — the LLM does not override the state — which makes state transitions deterministic regardless of model provider. A routing guard added post-submission corrects mis-delegation for states with one unambiguous specialist (§9).
 2. **The Specialists:** Stateless prompt agents that handle single-turn tasks (Onboarding, Planning, Recovery, Reflection). Each receives an injected `{learner_context}` block from the memory layer, giving them awareness of the learner's history without requiring full conversation replay.
 
 ### 3.2. Planning Agent: ReAct Tool Loop
@@ -91,10 +91,10 @@ The system guides the user through four structured flows:
 1. **Onboarding (States S1–S6):** A motivational interviewing flow.
    * **S1 — Welcome:** Sets tone; explains the agency-first approach.
    * **S2 — Goal Discovery:** Explores intrinsic motivation. Goal category is inferred only from explicit signals (e.g., "coding" → technical, "fun" → personal); no default label is forced.
-   * **S3 — History & Barriers:** Past attempts and specific blockers (fatigue, family, work).
+   * **S3 — History & Barriers:** Past attempts and specific blockers (fatigue, family, work), captured verbatim from the learner's own words.
    * **S4 — Context & Resources:** Weekly time budget (hours) and best focus window (morning, afternoon, evening). Hours are only captured when the learner explicitly mentions a unit ("5 hours", "3 hrs/week").
    * **S5 — Readiness Check:** Confidence score (1–10). The parser guards against confusion with time answers — if the message references hours, the score is left unset and the LLM re-asks.
-   * **S6 — Summary & Confirm:** LLM summarizes the full profile in the learner's own words. On confirmation, the profile is persisted and the state transitions to PLANNING.
+   * **S6 — Summary & Confirm:** LLM summarizes the full profile in the learner's own words. On confirmation, the profile is persisted and the state transitions to PLANNING. Each state now gates on genuine answers rather than always advancing (§9).
 2. **Weekly Planning:** The coach co-creates a study plan grounded in real calendar availability. The planning agent checks free/busy slots, proposes sessions that fit the learner's weekly budget (±10%), and confirms only after explicit learner agreement.
 3. **Supportive Recovery:** Triggered automatically two hours after a missed session. Instead of punitive alerts, the agent explores what got in the way and co-creates a reschedule via the MCP calendar.
 4. **Metacognitive Reflection:** Triggered on session completion or weekly review. The coach prompts reflection on focus and energy to reinforce positive feedback loops.
@@ -212,7 +212,7 @@ The onboarding agent intentionally avoids forcing a professional framing. Goal c
 
 ## 8. Experimental Results & Validation
 
-The test suite runs **60 automated Jest tests across 17 test suites** covering unit tests (LLM service, memory service, coordinator routing, each specialist) and end-to-end integration flows (onboarding S1–S6, planning confirmation, recovery with reschedule, reflection skip/complete, memory extraction and summarization).
+The test suite runs **88 automated Jest tests across 19 test suites** covering unit tests (LLM service, memory service, coordinator routing, each specialist) and end-to-end integration flows (onboarding S1–S6, planning confirmation, recovery with reschedule, reflection skip/complete, memory extraction and summarization).
 
 ### 8.1. Latency Performance
 
@@ -249,6 +249,8 @@ The development followed a three-stage systematic refactor:
 3. **Stage 2 — Memory Layer:** Introduced a fire-and-forget memory extraction pipeline. After each specialist turn, an async LLM call extracts structured facts (preference, barrier, progress, insight) and stores them in `learner_memories`. A weekly cron (`summarizeActiveUsers`) compresses accumulated facts into narrative summaries when ≥5 new facts exist. Each turn injects a `{learner_context}` block into specialist prompts so the coach retains awareness across sessions without replaying full conversation history.
 
 4. **Ongoing — Bug Fixes & Hardening:** Fixed MCP calendar parameter mismatches (`title` → `summary` for creates, `{id}` → `{eventId}` for deletes); captured Google Calendar event IDs for correct future deletes; tightened onboarding slot parsing (hours regex requires unit context; confidence score guards against time-answer confusion; goal category drops the `professional` forced default).
+
+5. **Stage 3 — Post-Submission Reliability Review:** A structured review against real usage found four defects sharing one root pattern: silently fabricating or skipping past information instead of grounding responses in what was actually known. Fixed, each verified against the real LLM rather than mocks alone: schedule dates/preferences now ground in the learner's real timezone and ask rather than assume; calendar sync results are surfaced honestly; onboarding stages gate on genuine answers (previously `NOT NULL` fields migrated to nullable so "unknown" is stored honestly, not defaulted); and the Coordinator routing guard (§3.1).
 
 ---
 

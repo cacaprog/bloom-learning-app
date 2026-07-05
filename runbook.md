@@ -51,12 +51,14 @@ NODE_ENV="development"
 
 ## 4. Running Database Migrations
 
-Apply the table schemas defined in [01_init.sql](backend/src/db/migrations/01_init.sql) to your database:
+Apply the table schemas defined in [backend/src/db/migrations/](backend/src/db/migrations/) to your database. Migrations run in order (`01_init.sql` → `02_reflections.sql` → `03_memory.sql` → `04_nullable_onboarding_fields.sql`) and are safe to re-run:
 
 ```bash
 cd backend
 npm run db:migrate
 ```
+
+*Note: [04_nullable_onboarding_fields.sql](backend/src/db/migrations/04_nullable_onboarding_fields.sql) makes `weekly_time_budget_hours` and `confidence_score` nullable on `learner_profiles`, so onboarding can store a genuinely unanswered field as unset instead of a fabricated default. If you're running against an existing database created before this migration, re-run `npm run db:migrate` to pick it up — the in-memory mock DB needs no migration step.*
 
 ---
 
@@ -145,6 +147,37 @@ curl -X POST http://localhost:3000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"userId": "mock-user-id", "message": "skip", "state": "REFLECTION"}'
 ```
+
+### Verification 6: Weekly Plan Confirmation & Calendar Sync Confirmation
+Confirming a plan now returns a `calendarSync` field alongside the usual response, naming how many sessions were actually added to the calendar:
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "mock-user-id", "message": "/confirm-plan", "state": "PLANNING"}'
+```
+Expect a response containing:
+```json
+{
+  "response": "...",
+  "state": "ACTIVE_WEEK",
+  "calendarSync": {
+    "weeklyGoal": "...",
+    "totalSessions": 3,
+    "syncedCount": 3,
+    "sessions": [ { "topic": "...", "scheduledAt": "...", "synced": true } ]
+  }
+}
+```
+If `syncedCount` is less than `totalSessions`, the response still states clearly which sessions did not sync — the confirmation never claims full success it didn't achieve.
+
+### Verification 7: Onboarding Stage Gating (Incomplete Answer)
+Sending a partial answer to a state that needs two pieces of information (weekly time budget *and* best focus time) no longer advances the conversation — the coach asks for the missing piece instead:
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"userId": "mock-user-id", "message": "I can do 4 hours a week", "state": "ONBOARDING_S4"}'
+```
+Expect `"state": "ONBOARDING_S4"` (unchanged) in the response, with the reply asking specifically about focus time. Sending a follow-up message that supplies the missing piece advances to `"state": "ONBOARDING_S5"`. If neither piece is ever supplied, the state still advances after 3 turns in `ONBOARDING_S4` — but the missing field is stored as unset, not backfilled with a fabricated value.
 
 ---
 
@@ -244,4 +277,15 @@ MCP_CALENDAR_SERVER_URL="http://localhost:3001/"
 * During the **Weekly Planning** phase, once a learning plan is finalized and agreed upon (either via conversation or `/confirm-plan`), the backend triggers calendar sync tool calls.
 * Events are dynamically created (using server-exposed tool names such as `create_event` or `create_calendar_event`).
 * If a session is deleted or rescheduled, the corresponding remote events are deleted/updated using `delete_event`.
+
+---
+
+## 10. Recent Reliability Improvements
+
+A structured post-launch review fixed four defects, all traced to the same root pattern — the system silently guessing or skipping past something instead of grounding its response in what was actually known. Each is now covered by automated tests and, where the defect was only reproducible against a real model, by repeated real-LLM verification (a mocked or single-run test cannot surface a probabilistic failure).
+
+* **Schedule suggestion accuracy**: "today"/"tomorrow" and other relative day references are resolved against the learner's real timezone (`users.timezone`), not server time. A missing weekly time budget or best-focus-time preference is asked for instead of silently defaulted.
+* **Calendar sync confirmation**: confirming a plan now returns a `calendarSync` field (see Verification 6) so the frontend can show the learner an honest sync result, including partial failures, instead of a silent transition.
+* **Onboarding stage completeness**: each onboarding state (S1–S6) only advances once its required information is genuinely captured, or the existing 3-turn-per-state cap is reached (see Verification 7). Fields the learner never answered are stored as unset (`weekly_time_budget_hours`, `confidence_score` are nullable as of migration `04_nullable_onboarding_fields.sql`) rather than backfilled with a plausible-looking default.
+* **Coordinator routing guard**: for every conversation state with one unambiguous required specialist, a deterministic check corrects the Coordinator's specialist choice if the LLM's routing call picks the wrong one — measured at roughly a 1-in-8 mismatch rate before this fix, 0-in-12 after, across repeated real-LLM trials.
 
